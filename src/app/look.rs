@@ -35,6 +35,9 @@ pub const DEBOUNCE: Duration = Duration::from_millis(120);
 #[derive(Debug)]
 enum Job {
     Sync(Box<nuxut::Theme>),
+    /// GTK dosyaları dışarıdan değişti: aynı plan da yeniden uygulanır (`guard` unutulur); yazım
+    /// olursa (başka bir araç Nuxut dosyasını değiştirmişti) sonuç `repaired`.
+    Verify(Box<nuxut::Theme>),
     /// `msg snapshot restore` bir `look.*` ayarını geri yükledi (geri yazılan değerlerle).
     Restored(String, Box<nuxut_apply::RestoredValues>),
 }
@@ -67,6 +70,10 @@ pub(super) struct LookRuntime {
     pub(super) cursor_env: Vec<(String, String)>,
     /// Kurulu tema dizinleri izleyicisi (`msg look status` `themes_rev`); açılamazsa `None` (0).
     themes: Option<look::watch::ThemeWatcher>,
+    /// GTK yapılandırma dosyaları izleyicisi (kendini onarma; `look::gtk_watch`).
+    gtk: Option<look::gtk_watch::GtkWatcher>,
+    /// Bu oturumda onarma bildirimi gösterildi mi (bir kez).
+    repair_notified: bool,
 }
 
 impl LookRuntime {
@@ -121,6 +128,8 @@ impl Shell {
             let mut next: Option<Box<nuxut::Theme>> = None;
             // Yarıda kalan turların yazdığı, canlı eylemi henüz gönderilmemiş ayarlar.
             let mut carried: Vec<&'static str> = Vec::new();
+            // Bu tur bir doğrulama isteğinden mi (GTK dosyaları dışarıdan değişti).
+            let mut verify = false;
             loop {
                 let job = match next.take() {
                     Some(theme) => Job::Sync(theme),
@@ -136,6 +145,10 @@ impl Shell {
                         continue;
                     }
                     Job::Sync(theme) => theme,
+                    Job::Verify(theme) => {
+                        verify = true;
+                        theme
+                    }
                 };
                 // Birleştirme (ilk tur hemen: Hyprland eşitlemesi bekliyor).
                 let mut theme = theme;
@@ -144,6 +157,10 @@ impl Shell {
                     loop {
                         match rx.recv_timeout(DEBOUNCE) {
                             Ok(Job::Sync(t)) => theme = t,
+                            Ok(Job::Verify(t)) => {
+                                verify = true;
+                                theme = t;
+                            }
                             Ok(Job::Restored(s, v)) => restored.push((s, v)),
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -151,6 +168,10 @@ impl Shell {
                     }
                 }
                 let started = Instant::now();
+                let round_verify = std::mem::take(&mut verify);
+                if round_verify {
+                    guard.forget();
+                }
                 let result = match LookState::read(&theme) {
                     // Aynı plan (tetik kurulu tema izleyicisinden ya da ilgisiz bir yeniden
                     // yüklemeden geldi): yazım, sinyal, log yok (`look::guard`).
@@ -163,7 +184,7 @@ impl Shell {
                         state.plan = filtered;
                         // Son seçim kazanır: yeni istek gelmişse kalan ayarlar ve canlı eylemler
                         // atlanır, en yenisiyle hemen yeniden başlanır.
-                        let mut cancel = || newer_request(&rx, &mut next, &mut restored);
+                        let mut cancel = || newer_request(&rx, &mut next, &mut restored, &mut verify);
                         let mut result = look::sync_with(&state, &env, &mut sink, &mut cancel, &carried);
                         if let Some(r) = result.report.as_ref().filter(|r| r.cancelled) {
                             for s in &r.written {
@@ -204,6 +225,10 @@ impl Shell {
                 for (s, v) in restored {
                     writer::after_restore(&env, &mut sink, &s, &v, settings_ini.as_deref());
                 }
+                let result = result.map(|mut r| {
+                    r.repaired = round_verify && r.report.as_ref().is_some_and(|x| !x.cancelled && !x.written.is_empty());
+                    r
+                });
                 if let Some(result) = result
                     && sender.send(ShellMessage::Look(result)).is_err()
                 {
@@ -215,6 +240,16 @@ impl Shell {
             Ok(thread) => {
                 self.look.worker = Some(LookWorker { tx: Some(tx), thread: Some(thread) });
                 self.request_look_sync(cx);
+                // Kendini onarma: GTK dosyaları dışarıdan değişince doğrulama turu (`look::gtk_watch`).
+                if let Some(config) = look::plan::Dirs::from_env().map(|d| d.config) {
+                    let sender = cx.sender();
+                    match look::gtk_watch::GtkWatcher::spawn(config, look::gtk_watch::SETTLE, move || {
+                        let _ = sender.send(ShellMessage::GtkFilesChanged);
+                    }) {
+                        Ok(w) => self.look.gtk = Some(w),
+                        Err(e) => tracing::warn!("GTK dosya izleyicisi açılamadı: {e}"),
+                    }
+                }
             }
             Err(e) => {
                 tracing::warn!("görünüm thread'i açılamadı: {e}");
@@ -232,6 +267,13 @@ impl Shell {
         }
         self.look.last = Some(Box::new(theme.clone()));
         let _ = tx.send(Job::Sync(Box::new(theme.clone())));
+    }
+
+    /// GTK dosyaları dışarıdan değişti: aynı girdiyle de doğrulama turu (`Job::Verify`).
+    pub(super) fn gtk_files_changed(&mut self, cx: &mut Context<Self>) {
+        if let Some(tx) = self.look.worker.as_ref().and_then(|w| w.tx.as_ref()) {
+            let _ = tx.send(Job::Verify(Box::new(cx.theme().clone())));
+        }
     }
 
     /// Kurulu temalar değişti: aynı girdiyle de tur iste (yeni kurulan istenen tema yedeğin
@@ -254,6 +296,16 @@ impl Shell {
         let colors = result.report.as_ref().is_some_and(|r| !r.cancelled && r.written.contains(&look::plan::setting::MODE));
         if colors {
             self.refresh_static_apps(cx);
+        }
+        // Başka bir araç Nuxut'un GTK dosyalarını değiştirmişti, Nuxut yeniden uyguladı: oturumda
+        // bir kez söylenir (kullanıcı isteği 2026-10-17: "neler oluyor" denmesin).
+        if result.repaired && !std::mem::replace(&mut self.look.repair_notified, true) {
+            let notice = InternalNotice::popup(
+                t!("shell-look-repaired-title"),
+                t!("shell-look-repaired-body"),
+                vec![InternalAction::new(t!("shell-look-repaired-use-other"), "look use-other-tool")],
+            );
+            self.notice(cx, notice);
         }
         if result.report.is_some() {
             self.look.report = result.report;
@@ -306,10 +358,14 @@ fn app_name(app: look::app_refresh::App) -> String {
 
 /// Tur sürerken kuyruğa bakar (bloklamaz): yeni `Sync` geldiyse en yenisi `next`'e konur ve tur
 /// yarıda bırakılmalıdır (`true`). Geri yükleme bildirimleri turu kesmez, sonra işlenir.
-fn newer_request(rx: &mpsc::Receiver<Job>, next: &mut Option<Box<nuxut::Theme>>, restored: &mut Vec<(String, Box<nuxut_apply::RestoredValues>)>) -> bool {
+fn newer_request(rx: &mpsc::Receiver<Job>, next: &mut Option<Box<nuxut::Theme>>, restored: &mut Vec<(String, Box<nuxut_apply::RestoredValues>)>, verify: &mut bool) -> bool {
     while let Ok(job) = rx.try_recv() {
         match job {
             Job::Sync(t) => *next = Some(t),
+            Job::Verify(t) => {
+                *verify = true;
+                *next = Some(t);
+            }
             Job::Restored(s, v) => restored.push((s, v)),
         }
     }
@@ -350,14 +406,14 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let mut next = None;
         let mut restored = Vec::new();
-        assert!(!newer_request(&rx, &mut next, &mut restored), "boş kuyruk turu kesmez");
+        assert!(!newer_request(&rx, &mut next, &mut restored, &mut false), "boş kuyruk turu kesmez");
         tx.send(Job::Restored("look.icons".into(), Box::default())).unwrap();
-        assert!(!newer_request(&rx, &mut next, &mut restored), "geri yükleme turu kesmez");
+        assert!(!newer_request(&rx, &mut next, &mut restored, &mut false), "geri yükleme turu kesmez");
         assert_eq!(restored.len(), 1);
         let a = nuxut::Theme { contrast: nuxut::theme::ContrastMode::High, ..Default::default() };
         tx.send(Job::Sync(Box::default())).unwrap();
         tx.send(Job::Sync(Box::new(a.clone()))).unwrap();
-        assert!(newer_request(&rx, &mut next, &mut restored));
+        assert!(newer_request(&rx, &mut next, &mut restored, &mut false));
         assert!(same_input(next.as_deref().unwrap(), &a), "en yeni istek kazanır");
     }
 

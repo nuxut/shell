@@ -358,3 +358,110 @@ fn packages_install_runs_pacman_with_fixed_arguments() {
     assert!(!ok);
     assert!(ev.iter().any(|e| matches!(e, Event::PackagesResult { outcome: Outcome::RolledBack, .. })));
 }
+
+/// Giriş ekranı ön koşulları ve sahte systemctl/localectl/systemd-tmpfiles (çağrılar `calls.log`).
+fn add_greeter(env: &Env) {
+    use nuxut_system_helper::greeter::{GREETD_BIN, PASSWD, REQUIRED};
+    let uid = rustix::process::getuid().as_raw();
+    let r = |rel: &str| env.root.join(rel);
+    for f in REQUIRED.iter().chain([&GREETD_BIN]) {
+        write(&r(f), "x");
+        std::fs::set_permissions(r(f), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    write(&r(PASSWD), format!("root:x:0:0::/root:/bin/sh\ngreeter:x:964:964::/var/lib/greeter:/bin/false\nayse:x:{uid}:{uid}:Ayşe:/home/ayse:/bin/sh\n"));
+    for e in walk(&env.root) {
+        if e.is_dir() {
+            std::fs::set_permissions(&e, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let log = env.root.parent().unwrap().join("calls.log");
+    for tool in ["systemctl", "localectl", "systemd-tmpfiles"] {
+        script(&env.bin.join(tool), &format!("echo \"{tool} $*\" >> '{}'", log.display()));
+    }
+}
+
+fn look_args(no_login: bool) -> Vec<String> {
+    let mut v = apply_args("grub");
+    v[0] = "system-look".into();
+    if no_login {
+        v.push("--no-login".into());
+    } else {
+        v.extend(["--layout", "tr", "--no-theme"].map(String::from));
+    }
+    v
+}
+
+fn domains(ev: &[Event]) -> Vec<&str> {
+    ev.iter().filter_map(|e| if let Event::Domain { domain } = e { Some(domain.as_str()) } else { None }).collect()
+}
+
+fn login_outcome(ev: &[Event]) -> Option<Outcome> {
+    ev.iter().find_map(|e| if let Event::LoginResult { outcome, .. } = e { Some(*outcome) } else { None })
+}
+
+/// `system-look` (2026-10-17): açılış görünümü ve giriş ekranı tek çağrıda, sırayla; geri alma
+/// ikisini de geri alır.
+#[test]
+fn system_look_applies_and_reverts_both() {
+    let Some(env) = setup() else { return };
+    add_greeter(&env);
+    let a = look_args(false);
+    let (ok, ev) = run(&env, &a.iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(ok, "{ev:#?}");
+    assert_eq!(domains(&ev), ["boot-theme", "greeter"]);
+    assert_eq!(outcome(&ev, "grub"), Some(Outcome::Applied));
+    assert_eq!(login_outcome(&ev), Some(Outcome::Applied), "{ev:#?}");
+    assert_eq!(ev.iter().filter(|e| matches!(e, Event::Done { ok: true, .. })).count(), 2, "alan başına bir done");
+    assert!(read(&env, "boot/grub/grub.cfg").contains("themes/nuxut"));
+    assert!(env.root.join("etc/greetd/config.toml").exists());
+    let calls = std::fs::read_to_string(env.root.parent().unwrap().join("calls.log")).unwrap();
+    assert!(calls.contains("systemctl enable greetd.service") && calls.contains("localectl set-x11-keymap tr"), "{calls}");
+
+    let (ok, ev) = run(&env, &["system-look", "revert"]);
+    assert!(ok, "{ev:#?}");
+    assert_eq!(domains(&ev), ["boot-theme", "greeter"]);
+    assert_eq!(outcome(&ev, "grub"), Some(Outcome::Reverted));
+    assert_eq!(login_outcome(&ev), Some(Outcome::Reverted));
+    assert!(!read(&env, "boot/grub/grub.cfg").contains("themes/nuxut"));
+    assert!(!env.root.join("etc/greetd/config.toml").exists(), "önceden yoktu");
+}
+
+/// Bir parça başarısız olursa öbürü kendi işlemiyle kalır; çıkış kodu 1.
+#[test]
+fn system_look_parts_are_independent() {
+    let Some(env) = setup() else { return };
+    add_greeter(&env);
+    std::fs::remove_file(env.root.join(nuxut_system_helper::greeter::GREETD_BIN)).unwrap();
+    let a = look_args(false);
+    let out = Command::new(env!("CARGO_BIN_EXE_nuxut-system-helper"))
+        .args(&a)
+        .env("NUXUT_HELPER_TEST_ROOT", &env.root)
+        .env("NUXUT_HELPER_TEST_BIN", &env.bin)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let ev: Vec<Event> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(outcome(&ev, "grub"), Some(Outcome::Applied), "açılış görünümü kalır");
+    assert_eq!(login_outcome(&ev), Some(Outcome::Skipped));
+    assert!(ev.iter().any(|e| matches!(e, Event::LoginResult { message: Some(m), .. } if m == "greetd-missing")));
+    assert!(!env.root.join("etc/greetd/config.toml").exists());
+    // Yalnız açılış: giriş ekranına dokunulmaz.
+    let (ok, ev) = run(&env, &look_args(true).iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(ok, "{ev:#?}");
+    assert_eq!(domains(&ev), ["boot-theme"]);
+}
+
+#[test]
+fn system_look_bad_arguments_exit_2() {
+    let Some(env) = setup() else { return };
+    for bad in [&["system-look", "apply", "--no-boot", "--no-login"][..], &["system-look", "status"], &["system-look", "apply", "--no-boot", "--layout", "tr;x"]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nuxut-system-helper"))
+            .args(bad)
+            .env("NUXUT_HELPER_TEST_ROOT", &env.root)
+            .env("NUXUT_HELPER_TEST_BIN", &env.bin)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{bad:?}");
+        assert!(out.stdout.is_empty());
+    }
+}

@@ -8,6 +8,10 @@
 #[cfg(test)]
 #[path = "../tests/support/liveness.rs"]
 pub(crate) mod test_liveness;
+/// Testlerin sahte araç betikleri (ETXTBSY yarışsız yazım; entegrasyon testleriyle aynı dosya).
+#[cfg(test)]
+#[path = "../tests/support/exec.rs"]
+pub(crate) mod test_exec;
 
 pub mod app;
 pub mod bar_damage;

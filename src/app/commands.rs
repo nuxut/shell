@@ -164,12 +164,14 @@ impl Shell {
                 &self.wallpaper_decoder.stats(),
             )),
             Command::Look(ipc::LookCommand::RestartApp(app)) => restart_app(app),
+            Command::Look(ipc::LookCommand::UseOtherTool) => use_other_tool(self.apply_env.clone()),
             Command::Look(c) => {
                 let state = crate::services::look::LookState::read(cx.theme())?;
                 Ok(match c {
                     ipc::LookCommand::Status => state.status_json(self.look.writer(), self.look.report.clone(), self.look.themes_rev()),
                     ipc::LookCommand::Plan => state.plan_json(self.look.writer()),
                     ipc::LookCommand::RestartApp(app) => return restart_app(app),
+                    ipc::LookCommand::UseOtherTool => return use_other_tool(self.apply_env.clone()),
                 })
             }
             c @ (Command::Volume { .. } | Command::VolumeMute { .. } | Command::MicMute { .. } | Command::Brightness { .. }) => {
@@ -460,6 +462,19 @@ fn fix_target(key: &str, candidate: &str) -> String {
         Some((parent, _)) => format!("{parent}.{candidate}"),
         None => candidate.to_owned(),
     }
+}
+
+/// `msg look use-other-tool` (onarma bildirimindeki "Bu aracı kullan"): birleşik görünüm kapatılır;
+/// Nuxut öncesine dönüş tema değişiminden her zamanki yoldan gelir. Yazım arka planda.
+fn use_other_tool(env: nuxut_apply::Env) -> Result<String, String> {
+    std::thread::Builder::new()
+        .name("nuxut-look-off".into())
+        .spawn(move || match crate::services::color_mode::set_unified_off(&env) {
+            Ok(written) => tracing::info!(written, "birleşik görünüm kapatıldı (başka aracın teması kullanılacak)"),
+            Err(e) => tracing::warn!("birleşik görünüm kapatılamadı: {}", crate::services::apply::error_text(&e)),
+        })
+        .map(|_| "ok".to_owned())
+        .map_err(|e| e.to_string())
 }
 
 /// `msg look restart-app <kimlik>` (bildirimdeki "Şimdi yeniden başlat"): bloklayan D-Bus işi arka

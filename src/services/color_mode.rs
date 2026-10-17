@@ -26,13 +26,21 @@ pub fn framework_toml(env: &Env) -> Option<PathBuf> {
 
 /// `[colors] mode`'u `mode`'a ayarlar. Yazıldıysa `true`, zaten öyleyse `false`.
 pub fn set_mode(env: &Env, mode: ThemeMode) -> Result<bool, ApplyError> {
+    set_key(env, KeyPath::new(["colors", "mode"])?, &format!("\"{}\"", mode.name()))
+}
+
+/// `[desktop] unified = false`: birleşik görünümü kapatır (Nuxut öncesine dönüş framework.toml
+/// değişiminden her zamanki yoldan gelir). "Bu aracı kullan" bildirim düğmesi (2026-10-17).
+pub fn set_unified_off(env: &Env) -> Result<bool, ApplyError> {
+    set_key(env, KeyPath::new(["desktop", "unified"])?, "false")
+}
+
+fn set_key(env: &Env, key: KeyPath, literal: &str) -> Result<bool, ApplyError> {
     let path = framework_toml(env).ok_or(ApplyError::Invalid("XDG_CONFIG_HOME yok"))?;
-    let key = KeyPath::new(["colors", "mode"])?;
-    let literal = format!("\"{}\"", mode.name());
     let mut last = ApplyError::Changed;
     for _ in 0..ATTEMPTS {
         let (text, expect) = nuxut_apply::read_optional(&path)?.unwrap_or_else(|| (String::new(), Expect::Absent));
-        let new = edit::toml::set(&text, &key, Some(&literal)).map_err(|_| ApplyError::Parse(path.clone()))?;
+        let new = edit::toml::set(&text, &key, Some(literal)).map_err(|_| ApplyError::Parse(path.clone()))?;
         if new == text {
             return Ok(false);
         }

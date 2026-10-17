@@ -156,7 +156,12 @@ polkit eylemi). Kod: `crates/nuxut-system-helper/src/greeter.rs`; kullanıcı ta
   `nuxut-shell login-screen apply --json` → `pkexec /usr/lib/nuxut/nuxut-system-helper greeter
   apply --layout <çalışan Hyprland'in düzeni> …`; polkit eylemi `org.nuxut.system-helper.greeter`
   (`exec.path` + `exec.argv1 = greeter`, `auth_admin`). Durum: `login-screen status --json` (kök
-  gerekmez). Yardımcı kurulu değilse uygulama önce hazırlanmış dosyaları yönetici onayıyla kurar
+  gerekmez): `{"status":{greetd_installed, greeter_installed, display_manager, previous, active},
+  "helper":"installed|missing|unsafe", "helper_installable":bool}`; çıkış kodu 3 = yönetici onayı
+  verilmedi. Ayarlar adımı açılış görünümüyle aynı adımda ("Sistem görünümü", akış sürümü 3):
+  seçilenleri tek "Uygula" `nuxut-shell system-look apply --json` ile tek yönetici onayıyla
+  uygular (yardımcının `system-look` alanı, ADR-0008 ek); sonuç ve "Geri al" adımda (2026-10-17).
+  Yardımcı kurulu değilse uygulama önce hazırlanmış dosyaları yönetici onayıyla kurar
   (`system-theme install-helper`, ADR-0008 ek); kullanıcıya komut yazdırılmaz.
 - **`sh install.sh --system-theme`**: yardımcı, polkit eylemi ve giriş ekranı dosyaları hazırlanır
   (normal kurulum da hazırlar, kök dosya sistemine dokunmaz), gerekirse `pacman -S greetd`, sonra
@@ -230,8 +235,7 @@ Geri al: `sh install.sh --system-theme-revert` ya da `nuxut-shell login-screen r
 
 - Ekran klavyesi greeter oturumunda (kabuk yok; OSK'nın ayrı süreç biçimi).
 - cage/sway (katman yüzeyi olmayan) ortam için tek pencere kipi.
-- Ayarlar: Hoş geldin adımı (`login-screen status/apply --json`) ve "Giriş ekranı" bölümü (yeniden
-  yayımla, geri al, ekran okuyucu);
+- Ayarlar: "Giriş ekranı" bölümü (yeniden yayımla, geri al, ekran okuyucu; Hoş geldin adımı var);
   avatarın AccountsService'e de yazılması.
 - Kullanıcı listesi görünümü (oklar yerine sıra).
 

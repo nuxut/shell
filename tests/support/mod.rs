@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+pub mod exec;
 pub mod liveness;
 pub mod repo;
 pub mod skip;

@@ -185,7 +185,7 @@ pub struct Status {
 pub const STATUS_VERSION: u32 = 1;
 
 /// Mevcut temadan apply isteği (tüm uygulanabilir hedefler ya da `only`).
-fn request(theme: &nuxut::Theme, only: Option<Vec<Target>>, plan: &Plan) -> ApplyRequest {
+pub(crate) fn request(theme: &nuxut::Theme, only: Option<Vec<Target>>, plan: &Plan) -> ApplyRequest {
     let framework = crate::services::look::read_framework();
     let meta = if framework.wallpaper { crate::services::look::palette_meta() } else { None };
     ApplyRequest {
@@ -291,6 +291,7 @@ fn event_text(e: &Event) -> Option<String> {
             }
         }
         Event::LoginScreen { .. } => return None,
+        Event::Domain { domain } => format!("== {domain}"),
         Event::PackagesResult { outcome, names, message } => {
             let o = if *outcome == Outcome::Applied { "kuruldu" } else { "KURULAMADI" };
             match message {

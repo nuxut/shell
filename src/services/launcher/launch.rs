@@ -407,20 +407,15 @@ mod tests {
         let Some(env_bin) = find_executable("env", &path) else { return };
         let marker = tmp.path().join("out");
         // `env` + `sh` yalnızca testte işaret dosyası yazmak için (ürün kodu kabuk çağırmaz).
-        let source = tmp.path().join("probe.src");
-        std::fs::write(
-            &source,
-            format!(
+        // ETXTBSY yarışsız yazım (`tests/support/exec.rs`).
+        let script = tmp.path().join("probe");
+        crate::test_exec::write_executable(
+            &script,
+            &format!(
                 "#!/bin/sh\necho \"$XDG_ACTIVATION_TOKEN|$DESKTOP_STARTUP_ID|${{NUXUT_SHELL_INSTANCE:-yok}}|$(pwd)\" > {}\n",
                 marker.display()
             ),
-        )
-        .unwrap();
-        // Çalıştırılacak dosyayı alt süreç yazar: bu süreçteki bir yazma fd'sini aynı anda
-        // fork eden başka bir testin çocuğu miras alırsa exec ETXTBSY ile düşer.
-        let script = tmp.path().join("probe");
-        assert!(std::process::Command::new("cp").arg(&source).arg(&script).status().unwrap().success());
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let tools = Tools { setsid: find_executable("setsid", &path), systemd_run: None, path, home: None };
         let e = entry(&format!("Exec={} {}\nPath={}", env_bin.display(), script.display(), tmp.path().display()));
         let opts = LaunchOptions { systemd_scope: false, ..Default::default() };

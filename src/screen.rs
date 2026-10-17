@@ -1591,6 +1591,9 @@ impl Screen {
         if let Some(s) = self.launcher_sheet.shape(now) {
             shapes.push(s);
             owners.push(Some(LAUNCHER_OWNER));
+        } else {
+            // Yaprak çöktü: kapanışta bekletilen sorgu/sonuç temizliği.
+            self.launcher.release();
         }
         if let Some(s) = self.sysmon_sheet.shape(now) {
             shapes.push(s);

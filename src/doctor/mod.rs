@@ -140,6 +140,9 @@ pub struct Facts {
     pub competitors: Vec<&'static str>,
     /// Harici pano araçları: Hyprland `exec` satırları ve çalışan süreçler (içerik/komut yok).
     pub clip_tools: Vec<ClipTool>,
+    /// Başka bir temaya sembolik bağ olan kullanıcı GTK CSS'leri (`gtk-4.0/gtk.css`,
+    /// `gtk-4.0/gtk-dark.css`, `gtk-3.0/gtk.css`): birleşik görünüm açıkken Nuxut devralır.
+    pub gtk_links: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -406,7 +409,7 @@ pub fn evaluate(f: &Facts) -> Report {
             install(&cx, &f.install),
             shell(&f.live, &f.competitors),
             hyprland(&cx, running, &f.packs, f.hypr_config.as_deref()),
-            look(&cx, running),
+            look(&cx, running, &f.gtk_links),
             audio(running),
             portal(&cx, &f.portal, &f.install.install_sh),
             lock(&cx, &f.lock, running),
@@ -614,8 +617,19 @@ fn hyprland(cx: &Ctx, r: Option<&Running>, packs: &[PackHit], config: Option<&Pa
     section("hyprland", t!("shell-doctor-section-hyprland"), checks)
 }
 
-fn look(cx: &Ctx, r: Option<&Running>) -> Section {
+fn look(cx: &Ctx, r: Option<&Running>, gtk_links: &[PathBuf]) -> Section {
     let mut checks = Vec::new();
+    // Kullanıcı GTK CSS'i başka bir temaya bağ (gerçek vaka 2026-10-17: Dracula): libadwaita
+    // uygulamaları o temada kalır. Birleşik görünüm açıkken Nuxut açılışta ve dosya değişince
+    // yedekleyip devralır; kalmışsa söylenir (komut önerilmez).
+    if !gtk_links.is_empty() {
+        let list: Vec<String> = gtk_links.iter().map(|p| cx.path(p)).collect();
+        checks.push(
+            check("gtk_links", Level::Warn, t!("shell-doctor-look-gtk-links", list = join_limited(&list)))
+                .hint(t!("shell-doctor-hint-look-gtk-links"))
+                .data(json!({"paths": list})),
+        );
+    }
     match r.and_then(|r| r.look.as_ref()) {
         None => checks.push(not_running("writer")),
         Some(l) => {

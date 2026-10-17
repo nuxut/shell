@@ -3034,3 +3034,18 @@ shell-look-app-restart-body = { $app } renkleri yalnız açılırken okuyor. Şi
 
 # Nerede: Aynı bildirimdeki düğme (src/app/look.rs). Anlam: Uygulamayı şimdi kapatıp yeniden açar.
 shell-look-app-restart-now = Şimdi yeniden başlat
+
+# Nerede: Başka bir araç (tema yöneticisi, kurulum betiği) Nuxut'un GTK dosyalarını değiştirdiğinde ve Nuxut yeniden uyguladığında oturumda bir kez gösterilen bildirimin başlığı (src/app/look.rs). Anlam: Uygulama görünümü başka bir araçça değiştirildi, Nuxut düzeltti.
+shell-look-repaired-title = Uygulama görünümü yeniden Nuxut'ta
+
+# Nerede: Aynı bildirimin gövdesi (src/app/look.rs). Anlam: Başka bir araç GTK teması dosyalarını değiştirdi; Nuxut öncekini yedekleyip yeniden uyguladı; o aracın temasını kullanmak istenirse düğme.
+shell-look-repaired-body = Başka bir araç uygulamaların temasını değiştirdi. Nuxut öncekini yedekledi ve kendi görünümünü yeniden uyguladı. O aracın temasını kullanmak istersen birleşik görünümü kapatabilirsin.
+
+# Nerede: Aynı bildirimdeki düğme (src/app/look.rs). Anlam: Birleşik görünümü kapatıp diğer aracın temasını kullanmak.
+shell-look-repaired-use-other = Bu aracı kullan
+
+# Nerede: doctor raporu, Görünüm bölümü. Anlam: kullanıcının GTK CSS dosyaları başka bir temanın dosyalarına sembolik bağ; uygulamalar o temada kalıyor. $list yollar.
+shell-doctor-look-gtk-links = Uygulama teması dosyaları başka bir temaya bağlı: { $list }
+
+# Nerede: doctor öneri satırı. Anlam: birleşik görünüm açıkken Nuxut bu dosyaları kabuk açılışında ve dosya değişince yedekleyip kendisi devralır; Ayarlar › Görünüm'den açılır.
+shell-doctor-hint-look-gtk-links = Birleşik görünüm açıkken Nuxut bunları kabuk açılışında ve dosyalar değişince yedekleyip kendisi devralır (Ayarlar › Görünüm)

@@ -23,7 +23,7 @@ case \$1 in
       for p in "\$@"; do if has "\$p" "\${FAKE_MISSING:-}"; then echo "\$p"; rc=127; fi; done
       exit \$rc ;;
   -Qq) has "\$2" "\${FAKE_INSTALLED:-}" ;;
-  -S) exit 0 ;;
+  -S) shift; for p in "\$@"; do case \$p in -*) ;; *) if has "\$p" "\${FAKE_FAIL:-}"; then echo "hata: \$p ile çakışıyor" >&2; exit 1; fi ;; esac; done; exit 0 ;;
   *) exit 1 ;;
 esac
 EOF
@@ -79,5 +79,25 @@ scenario mixed "cmake ttf-material-symbols-variable" "ttf-material-symbols-varia
   base-devel cmake adw-gtk-theme ttf-material-symbols-variable
 [ "$(cat "$T/sudo.log")" = "pacman -S --needed --noconfirm cmake" ] || fail "mixed: sudo: $(cat "$T/sudo.log")"
 echo "4 tamam: yalnız eksik paket kuruldu"
+
+# 5) Paket hatası kurulumu durdurmaz: toplu kurulum düşünce tek tek denenir, kurulamayan nedeniyle
+#    yazılır ve PKG_FAILED'e girer, diğerleri kurulur, fonksiyon 0 döner.
+rm -f "$T/sudo.log"; : > "$T/pacman.log"
+PATH="$T/bin:$PATH" FAKE_MISSING="cmake adw-gtk-theme" FAKE_FAIL="adw-gtk-theme" FAKE_INSTALLED="" \
+  sh -c '. "$1"; shift; note() { printf "    %s\n" "$*"; }; warn() { printf "!! %s\n" "$*"; }; pkg_install_soft "$@"; echo "rc=$? failed=[$PKG_FAILED]"' \
+  x "$T/block.sh" base-devel cmake adw-gtk-theme > "$T/soft.out" 2>&1 || fail "soft: kabuk düştü: $(cat "$T/soft.out")"
+grep -qF "rc=0 failed=[ adw-gtk-theme]" "$T/soft.out" || fail "soft: $(cat "$T/soft.out")"
+grep -qF "adw-gtk-theme kurulamadı, atlandı: hata: adw-gtk-theme ile çakışıyor" "$T/soft.out" || fail "soft: neden yok: $(cat "$T/soft.out")"
+grep -qx "pacman -S --needed --noconfirm cmake" "$T/sudo.log" || fail "soft: cmake tek başına kurulmadı: $(cat "$T/sudo.log")"
+echo "5 tamam: paket hatasında kurulum sürdü, neden yazıldı"
+
+# 6) Sıra: paketler kaynaklar çekilip betik kendini yeniden exec ettikten SONRA kurulur (eski bir
+#    kopya paket adımında takılıp yeni betiğe ulaşamıyordu, 2026-10-17).
+reexec=$(grep -n 'exec sh "$SRC/shell/install.sh"' "$NEW" | head -n 1 | cut -d: -f1)
+pkgs=$(grep -n '^# --- Paketler' "$NEW" | cut -d: -f1)
+srcs=$(grep -n '^# --- Kaynaklar' "$NEW" | cut -d: -f1)
+[ -n "$reexec" ] && [ -n "$pkgs" ] && [ "$srcs" -lt "$reexec" ] && [ "$reexec" -lt "$pkgs" ] \
+  || fail "sıra: kaynaklar=$srcs yeniden-exec=$reexec paketler=$pkgs"
+echo "6 tamam: paket adımı yeniden exec'ten sonra"
 
 echo "HEPSİ TAMAM"

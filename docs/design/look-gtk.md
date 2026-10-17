@@ -58,6 +58,25 @@ Nautilus'ta görünen yüzeyler içerik ve kenar çubuğudur (`view_bg`/`sidebar
 koyusuyla neredeyse aynı); artık token'ı olmayan yüzey basamakları temanın üç yüzeyinden kurulur
 (`look/palette.rs` `fit_surface_ramp`).
 
+**Kendini onarma** (kullanıcı isteği 2026-10-17: "başka bir kullanıcı bu sorunlarla karşılaşınca
+'neler oluyor' demesin"; `src/services/look/gtk_watch.rs`): birleşik görünüm açıkken her kabuk
+açılışında ilk tur zaten uygular ve bağları devralır. Sonradan başka bir araç (tema yöneticisi,
+kurulum betiği) `gtk-3.0`/`gtk-4.0` altındaki `gtk.css`, `gtk-dark.css`, `assets`,
+`settings.ini` ya da `nuxut.css`'i değiştirir ya da yeniden bağlarsa inotify izleyicisi (700 ms
+birleştirme, parmak izi değişmediyse sessiz) bir doğrulama turu ister: plan aynı olsa da yeniden
+uygulanır (`ApplyGuard` unutulur). Değişmemişse `NoOp` (kendi yazımlarımızın turu döngü kurmaz);
+değişmişse önceki hâl yedeklenip yeniden devralınır ve oturumda bir kez bildirim: "Uygulama
+görünümü yeniden Nuxut'ta", "Bu aracı kullan" düğmesi (`msg look use-other-tool`: birleşik
+görünüm kapanır, Nuxut öncesi geri gelir; Ayarlar › Görünüm'den yeniden açılır). "Geri al" ayrı
+düğme değil: bu araçta geri almak ile o aracı kullanmak aynı sonuç. Araç sürekli geri alıyorsa
+`ApplyGuard` döngü kuralı ayarı bir süre durdurur. `doctor` Görünüm bölümü bağlı kalmış CSS'leri
+(`gtk_links`) söyler, komut önermez; Ayarlar durum kartı devralınan dosyaları zaten söyler.
+Devralınan dosyanın izni: çalıştırma biti yok, herkese açık kaynaktan 0644 (framework
+`takeover_mode`; gerçek makinede Dracula 0755 dosyasından 0705 çıkıyordu). Uçtan uca:
+`tools/live/look-selfheal/run.sh` (root'a ait adw-gtk3 bağları, açılışta devralma, dış yeniden
+bağlamada onarma, Nautilus içerik rengi = Nuxut `view_bg`). Açık kalan: `GTK_THEME` ortam
+değişkeni yalnız çakışma olarak raporlanıyor, kendiliğinden temizlenmiyor.
+
 **Canlı yenilenmeyen uygulamalar** (2026-10-17; `src/services/look/app_refresh.rs`): kullanıcıya
 `nautilus -q` gibi komut yazdırılmaz. `look.mode` (renkler) yazılınca, canlı eylem kapısı açıksa
 (test/ikincil örnekte değil) her listedeki uygulama için arka planda: çalışmıyorsa iş yok; açık

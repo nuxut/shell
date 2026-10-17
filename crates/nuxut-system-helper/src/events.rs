@@ -28,6 +28,8 @@ pub enum Event {
     LoginStep { step: String, state: StepState },
     /// Giriş ekranı alanının sonucu; `message` dil bağımsız kod (`greetd-missing` …) ya da hata.
     LoginResult { outcome: Outcome, message: Option<String> },
+    /// `system-look`: ardından gelen olayların alanı (`boot-theme` ya da `greeter`).
+    Domain { domain: String },
     /// Paket alanının sonucu (`packages install`): `applied` kuruldu, `rolled-back` pacman başarısız
     /// (`message` tanı metni).
     PackagesResult { outcome: Outcome, names: Vec<String>, message: Option<String> },

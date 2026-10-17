@@ -2007,6 +2007,18 @@ güvenmez). install.sh dosya varlığını değil etkin PATH'i (bu terminal + sy
 `--fix-path` (environment.d) yalnızca Hyprland dışı systemd/uwsm oturumları için. Kalıcı çözüm
 paket (`/usr/bin`) + giriş yöneticisi.
 
+**Yeniden girişsiz PATH** (2026-10-17): Hyprland env/envd'yi yalnız ilk açılışta değil, her
+yeniden yüklemede ve çalışırken `keyword`/`eval` ile de uygular (0.56.2 kaynağı: hyprlang
+`handleEnv` ve Lua `hl.env` ilk açılış dışında da `setenv` eder, değer aynıysa atlar). Bu yüzden
+install.sh sonunda dizin oturumda (bu terminal + systemd ortamı) yoksa çalışan Hyprland'e yalnız
+IPC ile eklenir: Lua ayarında `hyprctl eval` (Hyprland'in kendi PATH'i okunur, dizin varsa
+eklenmez; üçüncü argüman systemd/D-Bus'a da aktarır), hyprlang'da `hyprctl keyword envd
+PATH,<dizin>:$PATH`. Dosya yazılmaz. Hyprland'in başlattığı yeni terminaller hemen alır; açık
+terminaller eski PATH'i taşır ve çıktı bunu söyler. Hyprland dışında ya da IPC başarısızsa
+"oturumu yeniden açın" iletisi. Oturumda var ama bu terminalde yoksa yalnız "yeni terminallerde
+çalışır" denir. Test: `install_path.sh` (sahte hyprctl, gerçek `lua` ile parça denemesi;
+`XDG_RUNTIME_DIR` geçici olduğundan gerçek oturuma ulaşılamaz).
+
 **Kendini güncelleme** (2026-10-16): betik `$SRC/shell`'i git ile günceller
 ama çalışan kopya eskisidir; bu yüzden betikteki bir değişiklik eskiden ancak ikinci
 çalıştırmada etkili oluyordu. Artık kaynak güncellemesinden sonra `$SRC/shell/install.sh`
@@ -2014,8 +2026,9 @@ ama çalışan kopya eskisidir; bu yüzden betikteki bir değişiklik eskiden an
 kendini yeniden exec eder. Bekçi `NUXUT_INSTALL_REEXEC=1`: yeniden exec edilen kopya bir daha
 exec etmez; değişken betiğin başında silinir, kurulumun başlattığı süreçlere sızmaz. Dal
 `NUXUT_BRANCH` ortamıyla, kaynak dizini `--src`/`NUXUT_SRC` ile aynen geçer. Paket adımı
-yeniden çalışır (`--needed`; yeni sürüm yeni paket isteyebilir). Taze kurulum/yedek derlemeden
-sonra olduğu için bir kez yapılır. Dosyasız çalışmada (`curl … | sh`) karşılaştırma yapılmaz.
+yeniden exec'ten SONRA gelir (2026-10-17: eski bir kopya paket çakışmasında ölüp yeni betiğe
+hiç ulaşamıyordu); paketleri her zaman en yeni betik kurar, öncesinde yalnız git yoksa git kurulur.
+Taze kurulum/yedek derlemeden sonra olduğu için bir kez yapılır. Dosyasız çalışmada (`curl … | sh`) karşılaştırma yapılmaz.
 Test: `tests/it/install_reexec.rs` (`tests/fixtures/install_reexec.sh`: geçici HOME, yerel bare
 "origin", sahte cargo; tek yeniden exec, argümanlar, güncelken exec yok, bekçi).
 
@@ -2031,6 +2044,24 @@ değerler ortamdakiyle aynı doğrulamadan geçer (güvenlik incelemesi 2026-10-
 başlamaz. Kayıt kullanılınca çıktıda "kayıtlı kaynak: …", ilk kayıtta "Kaynak aynası kaydedildi: …"
 görünür. Özel adres yalnız kullanıcının durum dosyasındadır, betikte yoktur. Test:
 `install_source_trust.sh` 16.
+
+**Kayıtsız eski kurulum** (2026-10-17): önceki sürümler aynayı kaydetmiyordu; GitHub'dan gelen
+betik ayna klonlarını reddedip "kaldırın" diyordu. Ortam ve kayıt yokken bütün klonların origin'i
+aynı tabanı aynı önekle gösteriyorsa ve taban `https://` ya da `ssh://` ise (scp biçimi
+`kullanıcı@makine:yol`, `ssh://kullanıcı@makine/yol` sayılır) terminalde sorulur: **[E]** bu
+kaynakla devam (başarılı çekişten sonra `install.conf`'a yazılır; yeniden exec edilen betik de
+aynısını görür), **[g]** GitHub'a geç (önce bütün klonlar temiz ve eski kaynakta olmayan yerel
+commit'siz olmalı, yoksa hiçbirine dokunulmaz; ileri sarılabilen ileri sarılır, ayrı geçmişli
+klon `<dizin>.nuxut-yedek-<zaman>`'a taşınıp GitHub'dan yeniden indirilir: hiçbir şey silinmez),
+**[h]** dur. Terminal yoksa (`/dev/tty` açılamıyor) açık iletiyle ve verilecek
+`NUXUT_GIT_BASE`/`NUXUT_REPO_PREFIX` değeriyle durur; karışık kaynaklar reddedilir. Sahiplik/izin
+denetimi git'ten önce aynen. Origin karşılaştırması `remote.origin.url` (kullanıcının yazdığı
+adres; kendi `insteadOf` yönlendirmesi kullanıcının seçimidir). Test: `install_legacy_source.sh`.
+
+**Paket hatası kurulumu durdurmaz** (2026-10-17): eksikler (`pacman -T`) birlikte kurulamazsa tek
+tek denenir; kurulamayan paket nedeniyle (pacman'ın son satırı) yazılır ve atlanır, kaynak/derleme
+sürer. Derlemeden önce kurulamayanlar yeniden listelenir; eksik paket yüzünden derleme kırılırsa
+betik orada durur.
 
 **Paket algılama** (güvenlik incelemesi 2026-10-16: doğrulanmamış AUR paketine güven yok): betik
 AUR'dan hiçbir şey kurmaz, AUR yardımcısı (paru/yay) çağırmaz; bağımlılıklar yalnız resmî
@@ -2168,6 +2199,23 @@ yerel fonksiyonla uygular. Kaynak tarayan bekçiler (`no_hardcoded_*`, `mascot_p
 `source_guard`) taranan `.rs` sayısı `MIN_SHELL_SOURCES`'un altındaysa başarısız olur: boş/yanlış
 ağaçta sessiz yeşil yok.
 
+### İniş doğrulaması (2026-10-17)
+
+Dallar geliştirme ortamının iniş aracıyla (`tools/land`) iner: kilit, `rebase main`, sonra dalın
+commit'lenmiş hâli entegrasyon dizinlerinin kardeşi olan ayrı bir iniş ağacında doğrulanır
+(`cargo metadata --locked`, `cargo test --workspace --locked`, `cargo clippy --workspace
+--all-targets --locked -- -D warnings`), ff-only ve push; ardından bağımlı repoların kilit tazeliği.
+`--workspace` zorunlu: kök paket aynı zamanda çalışma alanı kökü olduğu için onsuz üye crate'ler
+(`lock`, `polkit`, `crates/*`…) denetlenmiyordu. Çalışma ağaçlarındaki `../framework` yolu
+entegrasyon framework'üne giden sembolik bağdır; yerel testler de main framework'e karşı koşar.
+Sessiz geri alma koruması: inecek fark, son 3 günde main'e inen bir commit'in önemli satırlarının
+en az yarısını (≥ 2 satır) geri alıyorsa iniş durur ve commit ile dosyaları söyler (iki kez,
+ilerlemiş main'e `reset --soft main` ile yapılan squash başkalarının işini sessizce geri almıştı;
+iki olay da yeniden oynatımda yakalanıyor, son 120 normal commit'te 2 bulgu, ikisi de bilinçli
+yeniden yazım). Bilinçli geri alma `--allow-revert <commit>` ile iner. İniş ağaçlarının paylaşılan
+hedef dizini kalıcıdır; boş disk 15 GB'ın altına inince kendi
+crate'lerimizin artefaktları `cargo clean -p` ile budanır (üçüncü partiler kalır).
+
 ### Testlerde zaman: koşul bekle, süre varsayma (2026-10-17)
 
 **Hata:** `audio_service`, kamera (`unattributed_and_renamed_opens_fail_closed`) ve tepsi testleri
@@ -2204,6 +2252,11 @@ Test seçenekleri ürün varsayılanına çekildi (çağrı 2 sn, 4 deneme; eski
   zayıflatır, kırmaz). "Şu gelmeli" bekleyen her şey koşul bekler (`collect_until`, `eventually`).
 - Dış araç çağrıları (`pw-dump`, `wpctl`…) kendi süre sınırını `LIVENESS`'tan alır; sorgu
   döngüsündeki geçici başarısızlık yeniden denenir.
+- Sahte araç betikleri `tests/support/exec.rs` `write_executable` ile yazılır (birim testlerinde
+  `crate::test_exec`): betik bu süreçte yazılıp hemen çalıştırılırsa, o anda fork eden başka bir
+  test thread'inin çocuğu yazma fd'sini exec'e dek tutar ve exec `ETXTBSY` ile düşer
+  (`O_CLOEXEC` kapatmaz). Yardımcı dosyayı alt süreçle (`cp`) yazar. Kanıt: `lock_launcher`
+  testleri 32 thread × 100 turda 7 kez düşüyordu, sonra 0.
 - Bilinen sınır (ürün, düzeltilmedi): ses yazımında hedef, gidiş-dönüş bittikten 1 sn
   (`SETTLE`) sonra sunucu değerine bırakılır; kabuk 1 sn'den uzun donup çözülürse yankı
   işlenmeden bırakılabilir ve o anda gelen tek bir göreli adım eski değerden hesaplanır.

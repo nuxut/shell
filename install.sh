@@ -314,6 +314,22 @@ pkg_install() { # paketler → yalnız eksikleri kurar; hepsi varsa pacman -S/su
     # shellcheck disable=SC2086
     sudo pacman -S --needed --noconfirm $PKG_NEED
 }
+PKG_FAILED=""
+pkg_install_soft() { # pkg_install gibi; hata kurulumu durdurmaz, kurulamayanlar PKG_FAILED'e
+    pkg_install "$@" && return 0
+    # Tek çakışma bütün işlemi düşürür: kalanlar tek tek denenir, her hatanın nedeni yazılır.
+    warn "Paketler birlikte kurulamadı; tek tek deneniyor."
+    for p in $PKG_NEED; do
+        if out=$(sudo pacman -S --needed --noconfirm "$p" 2>&1); then
+            note "$p kuruldu"
+        else
+            why=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)
+            warn "$p kurulamadı, atlandı: ${why:-bilinmeyen hata}"
+            PKG_FAILED="$PKG_FAILED $p"
+        fi
+    done
+    return 0
+}
 # <<< paket-seçimi
 
 ask() { # ask "soru" → 0 evet, 1 hayır
@@ -357,9 +373,20 @@ dir_private() {
     case ${st#* } in *[2367]?|*[2367]) return 1 ;; esac
 }
 
+# scp biçimli adres (kullanıcı@makine:yol) ssh:// eşdeğerine çevrilir (forge'lardaki eşleme:
+# kullanıcı@makine:sahip/depo.git = ssh://kullanıcı@makine/sahip/depo.git); diğerleri olduğu gibi.
+url_canon() {
+    case $1 in
+        *://*|/*) printf '%s' "$1" ;;
+        [!/]*@*:*) printf 'ssh://%s/%s' "${1%%:*}" "${1#*:}" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
 # Klonun origin'i beklenen depolardan biri mi ($1 dizin, $2 depo adı).
 origin_trusted() {
-    url=$(git -C "$1" remote get-url origin 2>/dev/null) || return 1
+    url=$(git -C "$1" config --get remote.origin.url 2>/dev/null) || return 1
+    url=$(url_canon "$url")
     for base in "$GIT_BASE" "$GIT_HTTPS" "$GIT_SSH"; do
         [ "$url" = "$base/$2.git" ] && return 0
     done
@@ -481,6 +508,27 @@ write_envd() {
     note "Bir sonraki girişte etkin (systemd kullanıcı oturumu, uwsm, nuxut-shell.service)."
 }
 
+# Çalışan Hyprland oturumunun PATH'ine $BIN (2026-10-17). Hyprland env/envd'yi çalışırken de
+# uygular (0.56.2 kaynağı: hyprlang handleEnv ve Lua hl.env ilk açılış dışında da setenv eder;
+# envd/üçüncü argüman systemd + D-Bus etkinleştirme ortamına da aktarır). Lua ayarında `hyprctl
+# eval` (Hyprland'in kendi PATH'i okunur, varsa eklenmez), hyprlang'da `hyprctl keyword envd`
+# ($PATH Hyprland'in ortamından açılır). Yalnız Hyprland IPC; dosya yazılmaz. Hyprland'in
+# başlattığı yeni süreçler hemen alır, açık terminaller almaz.
+hypr_path_live() {
+    [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v hyprctl >/dev/null 2>&1 || return 1
+    # Lua dizgesine ve hyprlang değerine yalnız yalın yol girer.
+    case $BIN in /*) ;; *) return 1 ;; esac
+    case $BIN in *[!A-Za-z0-9/._+-]*) return 1 ;; esac
+    lua="local p = os.getenv(\"PATH\") or \"\"; if not (\":\" .. p .. \":\"):find(\":$BIN:\", 1, true) then hl.env(\"PATH\", \"$BIN:\" .. p, true) end"
+    out=$(hyprctl eval "$lua" 2>&1) || return 1
+    case $out in
+        *"only supported with the lua"*)
+            # shellcheck disable=SC2016 # $PATH'i Hyprland açar
+            out=$(hyprctl keyword envd "PATH,$BIN:\$PATH" 2>&1) || return 1 ;;
+    esac
+    [ "$out" = ok ]
+}
+
 path_check() {
     # Etkin PATH denetlenir (dosyanın varlığı değil): environment.d yalnızca systemd kullanıcı
     # yöneticisini besler; tty → bash → start-hyprland yolunda Hyprland'in ortamına girmez.
@@ -493,15 +541,29 @@ path_check() {
     else
         session_path=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p') || session_path=""
     fi
-    if in_path "$BIN" "$PATH" || { [ -n "$session_path" ] && in_path "$BIN" "$session_path"; }; then
-        note "$BIN oturumun PATH'inde."
-        return 0
-    fi
     case $BIN in
         /usr/bin|/bin|/usr/local/bin) return 0 ;;
     esac
-    note "$BIN bu oturumun PATH'inde henüz yok; Nuxut'un Hyprland katmanı onu bir sonraki girişte"
-    note "ekler (kabuk başlangıç dosyalarınıza yazılmaz). Sonra da yoksa: nuxut-shell msg hypr status"
+    if [ -n "$session_path" ] && in_path "$BIN" "$session_path"; then
+        note "$BIN oturumun PATH'inde."
+        in_path "$BIN" "$PATH" || note "Bu terminal eski PATH'i taşıyor; yeni açılan terminallerde nuxut-shell çalışır."
+        return 0
+    fi
+    if in_path "$BIN" "$PATH"; then
+        note "$BIN bu terminalin PATH'inde."
+        return 0
+    fi
+    # Çalışan Hyprland oturumuna hemen eklenir (yeniden giriş beklenmez); kalıcı olanı Nuxut'un
+    # Hyprland katmanı her girişte yapar. Kabuk başlangıç dosyalarına yazılmaz.
+    if [ "$DRY_RUN" = 1 ]; then
+        [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && note "[deneme] $BIN çalışan Hyprland oturumunun PATH'ine eklenirdi (Hyprland IPC)."
+    elif hypr_path_live; then
+        note "$BIN çalışan Hyprland oturumunun PATH'ine eklendi: yeni açılan terminallerde nuxut-shell hemen çalışır"
+        note "(açık terminaller eski PATH'i taşır). Kalıcı ekleme her girişte Nuxut'un Hyprland katmanından."
+    else
+        note "$BIN bu oturumun PATH'inde henüz yok. Yeni terminallerde etkin olması için oturumu yeniden açın;"
+        note "Nuxut'un Hyprland katmanı onu girişte ekler. Sonra da yoksa: nuxut-shell msg hypr status"
+    fi
     if [ "$FIX_PATH" = 1 ]; then
         # Açık istek: systemd kullanıcı oturumu/uwsm ile başlayan kurulumlar için ek yol.
         write_envd
@@ -1039,9 +1101,16 @@ if [ "$ACTION" = uninstall ]; then
 fi
 
 # --- Ön kontroller ----------------------------------------------------------------------
-command -v git >/dev/null 2>&1 || [ "$DEPS" = 1 ] || die "git yok."
 IS_ARCH=0
 command -v pacman >/dev/null 2>&1 && IS_ARCH=1
+# Paketler kaynaklar çekilip betik kendini güncelledikten SONRA kurulur (aşağıda "Paketler"):
+# eski bir kopya paket adımında takılıp yeni betiğe hiç ulaşamıyordu (2026-10-17). Kaynakları
+# çekmek için yalnız git gerekir; yoksa önce yalnız o kurulur.
+if ! command -v git >/dev/null 2>&1; then
+    { [ "$DEPS" = 1 ] && [ "$IS_ARCH" = 1 ]; } || die "git yok."
+    say "git (kaynakları çekmek için)"
+    pkg_install git || die "git kurulamadı; önce git'i kurun."
+fi
 
 # --- Arch paketi (nuxut-git / nuxut) ------------------------------------------------------
 # AUR paketi kullanıcının kendi seçimidir; betik AUR'dan hiçbir şey kurmaz ve AUR yardımcısı
@@ -1058,43 +1127,6 @@ if [ "$ACTION" = install ] && [ "$IS_ARCH" = 1 ]; then
     done
 fi
 
-# --- Paketler ---------------------------------------------------------------------------
-if [ "$DEPS" = 1 ]; then
-    if [ "$IS_ARCH" = 1 ]; then
-        say "Paketler"
-        # Rust: rustup varsa onu kullan, yoksa Arch'ın 'rust' paketi.
-        RUST_PKG=""
-        command -v rustup >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1 || RUST_PKG=rust
-        # shellcheck disable=SC2086
-        pkg_install $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK $RUST_PKG
-        # AUR paketleri incelenmemiş PKGBUILD'lerdir (güvenlik incelemesi supply-chain, 2026-10-16):
-        # betik AUR yardımcısı (paru/yay) ÇAĞIRMAZ. Kurulu olanlar yalnız `pacman -Qi` ile algılanır;
-        # yalnız AUR'da olanlar için "kendiniz kurun" denir ve o özellik atlanır.
-        if [ "$CURSORS" = 1 ]; then
-            say "İmleç seti"
-            # shellcheck disable=SC2086
-            pkg_install $PKG_CURSORS_REPO || warn "$PKG_CURSORS_REPO kurulamadı."
-            # shellcheck disable=SC2086
-            pkg_missing $PKG_CURSORS_AUR
-            missing_aur=$PKG_NEED
-            [ -z "$missing_aur" ] || note "Şu imleç paketleri AUR'da, kendiniz kurun (PKGBUILD'i inceleyerek): $missing_aur — kurulmadıkça Ayarlar'da görünmezler."
-        fi
-    else
-        warn "Arch dışı sistem: paketleri kendiniz kurun (Arch adları): $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK rust"
-    fi
-fi
-
-# Rust araç zinciri yalnız pacman paketleriyle: `rust` ya da `rustup` (pacman). Betik rustup-init'i
-# `curl | sh` ile indirmez; rustup kuruluysa araç zincirini rustup kendisi (sağlama toplamıyla) çeker.
-if command -v rustup >/dev/null 2>&1; then
-    rustup toolchain list | grep -q . || { say "Rust araç zinciri (rustup default stable)"; rustup default stable; }
-fi
-command -v cargo >/dev/null 2>&1 || die "cargo bulunamadı (rust ya da rustup kurun)."
-RUSTV=$(rustc --version | awk '{print $2}')
-case $RUSTV in
-    1.[0-7][0-9].*|1.8[0-4].*) die "Rust $RUSTV çok eski; en az 1.85 (edition 2024) gerekir: rustup update ya da pacman -Syu rust" ;;
-esac
-
 # --- Kaynaklar --------------------------------------------------------------------------
 say "Kaynaklar: $SRC"
 path_trusted "$SRC" || die "Kaynak dizini ya da bir üst dizini başka bir kullanıcının değiştirebileceği yerde: $SRC (--src ile kendi dizininizi verin)."
@@ -1103,6 +1135,69 @@ dir_private "$SRC" || die "$SRC size ait değil ya da başkaları yazabiliyor (c
 if [ "$MIRROR_FROM_CONF" = 1 ]; then
     say "kayıtlı kaynak: ${GIT_BASE:-https://github.com/nuxut} (önek: ${REPO_PREFIX:-yok}) — $INSTALL_CONF"
     note "Değiştirmek için NUXUT_GIT_BASE (ve NUXUT_REPO_PREFIX) verin; kayıt güncellenir."
+fi
+# Kayıtsız eski kurulum (2026-10-17): önceki sürümler aynayı install.conf'a yazmıyordu; GitHub'dan
+# gelen betik var olan ayna klonlarını "beklenen depodan değil" diye reddediyordu. Ortam ve kayıt
+# yokken bütün klonlar aynı tabanı (aynı önekle) gösteriyorsa ve taban https:// ya da ssh://
+# ise terminalde sorulur: [E] bu kaynakla devam (başarılı çekişten sonra install.conf'a yazılır),
+# [g] GitHub'a geç (yalnız temiz, yerel commit'siz klonlar; ileri sarılamazsa eski klon yedeğe
+# taşınıp GitHub'dan yeniden indirilir), [h] dur. Terminal yoksa açık iletiyle durulur; karışık
+# kaynaklar reddedilir. Sahiplik/izin denetimi git'ten önce, aynen.
+GITHUB_SWITCH=0
+if [ "$MIRROR_FROM_ENV" = 0 ] && [ "$MIRROR_FROM_CONF" = 0 ]; then
+    found=0; mixed=0; old_base=""; old_prefix=""; old_list=""
+    for dir in framework shell settings calendar; do
+        [ -d "$SRC/$dir/.git" ] || continue
+        { dir_private "$SRC/$dir" && dir_private "$SRC/$dir/.git"; } \
+            || die "$SRC/$dir size ait değil ya da başkaları yazabiliyor; --src ile başka dizin verin."
+        u=$(git -C "$SRC/$dir" config --get remote.origin.url 2>/dev/null) || u=""
+        old_list="$old_list $dir=${u:-yok}"
+        u=$(url_canon "$u"); n=${u##*/}; n=${n%.git}
+        case $n in *"$dir") p=${n%"$dir"} ;; *) p="?" ;; esac
+        if [ "$found" = 0 ]; then old_base=${u%/*}; old_prefix=$p; found=1
+        elif [ "${u%/*}" != "$old_base" ] || [ "$p" != "$old_prefix" ]; then mixed=1
+        fi
+    done
+    if [ "$found" = 1 ] && [ "$old_prefix" = "" ] \
+        && { [ "$old_base" = "$GIT_HTTPS" ] || [ "$old_base" = "$GIT_SSH" ]; } && [ "$mixed" = 0 ]; then
+        : # zaten herkese açık depolar
+    elif [ "$found" = 1 ]; then
+        [ "$mixed" = 0 ] && [ "$old_prefix" != "?" ] \
+            || die "Mevcut klonlar farklı kaynakları gösteriyor:$old_list. Hepsini aynı kaynağa çevirin ya da --src ile başka dizin verin."
+        case $old_base in
+            *[[:space:][:cntrl:]]*) die "Mevcut kaynak adresinde boşluk ya da denetim karakteri var: $old_base" ;;
+            https://?*|ssh://?*) ;;
+            *) die "Mevcut kurulum desteklenmeyen bir kaynaktan ($old_base; yalnız https:// ya da ssh://). Kaynağı NUXUT_GIT_BASE ile verin ya da --src ile başka dizin seçin." ;;
+        esac
+        case $old_prefix in -*|*[!a-z0-9-]*) die "Mevcut klonların depo öneki geçersiz: $old_prefix" ;; esac
+        if ! ( : < /dev/tty ) 2>/dev/null; then
+            die "Mevcut kurulum $old_base kaynağından güncelleniyor ve bu kaynak kayıtlı değil. Onaylamak için betiği terminalde çalıştırın ya da kaynağı açıkça verin: NUXUT_GIT_BASE=$old_base NUXUT_REPO_PREFIX=$old_prefix"
+        fi
+        printf 'Mevcut kurulum %s kaynağından güncelleniyor. Bu kaynakla devam edilsin mi? [E]vet / [h]ayır / [g] GitHub'"'"'a geç: ' "$old_base"
+        read -r ans < /dev/tty || ans=h
+        case $ans in
+            ''|e|E|evet|Evet|y|Y|yes)
+                GIT_BASE=$old_base; REPO_PREFIX=$old_prefix
+                # Yeniden exec edilen yeni betik de aynı kaynağı görsün; kayıt çekişten sonra.
+                NUXUT_GIT_BASE=$GIT_BASE; NUXUT_REPO_PREFIX=$REPO_PREFIX
+                export NUXUT_GIT_BASE NUXUT_REPO_PREFIX
+                MIRROR_FROM_ENV=1 ;;
+            g|G)
+                # Önce hepsi denetlenir: biri uygun değilse hiçbir klona dokunulmaz.
+                for dir in framework shell settings calendar; do
+                    [ -d "$SRC/$dir/.git" ] || continue
+                    git -C "$SRC/$dir" checkout --quiet -- Cargo.lock 2>/dev/null || true
+                    [ -z "$(git -C "$SRC/$dir" status --porcelain)" ] \
+                        || die "$SRC/$dir içinde yerel değişiklik var; GitHub'a geçilmedi (kaynak değiştirilmedi)."
+                    [ -z "$(git -C "$SRC/$dir" rev-list -n 1 HEAD --not --remotes=origin 2>/dev/null)" ] \
+                        || die "$SRC/$dir içinde eski kaynakta olmayan yerel commit var; GitHub'a geçilmedi (kaynak değiştirilmedi)."
+                done
+                GITHUB_SWITCH=1; REPO_PREFIX="" ;;
+            *) die "Kurulum durduruldu; kaynak değiştirilmedi." ;;
+        esac
+        REPOS="framework:${REPO_PREFIX}framework shell:${REPO_PREFIX}shell settings:${REPO_PREFIX}settings calendar:${REPO_PREFIX}calendar"
+        SHELL_REPO=${REPO_PREFIX}shell
+    fi
 fi
 if [ -z "$GIT_BASE" ]; then
     # Herkese açık depolar (HTTPS); erişilemezse SSH.
@@ -1117,12 +1212,23 @@ EXPECT_SHELL_HEAD=""
 SOURCES_LINES=""
 for pair in $REPOS; do
     dir=${pair%%:*}; repo=${pair#*:}
+    if [ -d "$SRC/$dir/.git" ] && [ "$GITHUB_SWITCH" = 1 ]; then
+        # GitHub'a geçiş (klonlar yukarıda temiz ve yerel commit'siz bulundu): ileri sarılabiliyorsa
+        # ileri sarılır, değilse (ayrı geçmiş) eski klon yedeğe taşınıp yeniden indirilir.
+        git -C "$SRC/$dir" remote set-url origin "$GIT_BASE/$repo.git"
+        git -C "$SRC/$dir" fetch --quiet origin "$BRANCH" || die "$repo GitHub'dan çekilemedi ($GIT_BASE/$repo.git)."
+        if ! git -C "$SRC/$dir" merge-base --is-ancestor HEAD "origin/$BRANCH" 2>/dev/null; then
+            bak="$SRC/$dir.nuxut-yedek-$(date +%Y%m%d-%H%M%S)"
+            mv "$SRC/$dir" "$bak"
+            note "$dir: GitHub geçmişi farklı; eski klon yedekte: $bak"
+        fi
+    fi
     if [ -d "$SRC/$dir/.git" ]; then
         # Git komutlarından önce: klonun yapılandırması (kancalar, fsmonitor) komut çalıştırabilir.
         { dir_private "$SRC/$dir" && dir_private "$SRC/$dir/.git"; } \
-            || die "$SRC/$dir size ait değil ya da başkaları yazabiliyor; kaldırın ya da --src ile başka dizin verin."
+            || die "$SRC/$dir size ait değil ya da başkaları yazabiliyor; --src ile başka dizin verin."
         origin_trusted "$SRC/$dir" "$repo" \
-            || die "$SRC/$dir beklenen depodan değil (origin: $(git -C "$SRC/$dir" remote get-url origin 2>/dev/null || echo yok); beklenen: $GIT_BASE/$repo.git). Kaldırın ya da --src ile başka dizin verin."
+            || die "$SRC/$dir beklenen depodan değil (origin: $(git -C "$SRC/$dir" config --get remote.origin.url 2>/dev/null || echo yok); beklenen: $GIT_BASE/$repo.git). Doğru kaynağı NUXUT_GIT_BASE (ve NUXUT_REPO_PREFIX) ile verin ya da --src ile başka dizin seçin."
         # Derleme Cargo.lock'u yeniden yazmış olabilir; o bizim değişikliğimiz, geri al.
         git -C "$SRC/$dir" checkout --quiet -- Cargo.lock 2>/dev/null || true
         if [ -n "$(git -C "$SRC/$dir" status --porcelain)" ]; then
@@ -1156,8 +1262,8 @@ for pair in $REPOS; do
 done
 
 # Kaynak güncellemesi install.sh'yi değiştirdiyse yeni sürümle baştan (bir kez). Paket adımı
-# yeniden çalışır (--needed; yeni sürüm yeni paket isteyebilir); taze kurulum/yedek derlemeden
-# sonra olduğundan bir kez yapılır.
+# bundan sonra olduğundan paketleri her zaman en yeni betik kurar (yeni sürüm yeni paket
+# isteyebilir); taze kurulum/yedek derlemeden sonra olduğundan bir kez yapılır.
 if [ -z "$REEXECED" ] && [ -n "$SELF_SUM" ] && [ -f "$SRC/shell/install.sh" ] \
     && [ "$(cksum < "$SRC/shell/install.sh")" != "$SELF_SUM" ]; then
     reexec_target_trusted || die "$SRC/shell/install.sh doğrulanamadı (origin/$BRANCH ile aynı değil ya da değiştirilmiş); yeniden exec edilmedi."
@@ -1186,7 +1292,47 @@ if [ "$MIRROR_FROM_ENV" = 1 ]; then
     note "Sonraki çalıştırmalar ortam verilmezse bu kaynağı kullanır."
 fi
 
+# --- Paketler ---------------------------------------------------------------------------
+if [ "$DEPS" = 1 ]; then
+    if [ "$IS_ARCH" = 1 ]; then
+        say "Paketler"
+        # Rust: rustup varsa onu kullan, yoksa Arch'ın 'rust' paketi.
+        RUST_PKG=""
+        command -v rustup >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1 || RUST_PKG=rust
+        # Paket hatası kurulumu durdurmaz (2026-10-17): hangi paketin neden kurulamadığı yazılır,
+        # kaynak/derleme sürer; eksik paket yüzünden derleme kırılırsa betik orada durur.
+        # shellcheck disable=SC2086
+        pkg_install_soft $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK $RUST_PKG
+        # AUR paketleri incelenmemiş PKGBUILD'lerdir (güvenlik incelemesi supply-chain, 2026-10-16):
+        # betik AUR yardımcısı (paru/yay) ÇAĞIRMAZ. Kurulu olanlar yalnız `pacman -Qi` ile algılanır;
+        # yalnız AUR'da olanlar için "kendiniz kurun" denir ve o özellik atlanır.
+        if [ "$CURSORS" = 1 ]; then
+            say "İmleç seti"
+            # shellcheck disable=SC2086
+            pkg_install_soft $PKG_CURSORS_REPO
+            # shellcheck disable=SC2086
+            pkg_missing $PKG_CURSORS_AUR
+            missing_aur=$PKG_NEED
+            [ -z "$missing_aur" ] || note "Şu imleç paketleri AUR'da, kendiniz kurun (PKGBUILD'i inceleyerek): $missing_aur — kurulmadıkça Ayarlar'da görünmezler."
+        fi
+    else
+        warn "Arch dışı sistem: paketleri kendiniz kurun (Arch adları): $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK rust"
+    fi
+fi
+
+# Rust araç zinciri yalnız pacman paketleriyle: `rust` ya da `rustup` (pacman). Betik rustup-init'i
+# `curl | sh` ile indirmez; rustup kuruluysa araç zincirini rustup kendisi (sağlama toplamıyla) çeker.
+if command -v rustup >/dev/null 2>&1; then
+    rustup toolchain list | grep -q . || { say "Rust araç zinciri (rustup default stable)"; rustup default stable; }
+fi
+command -v cargo >/dev/null 2>&1 || die "cargo bulunamadı (rust ya da rustup kurun)."
+RUSTV=$(rustc --version | awk '{print $2}')
+case $RUSTV in
+    1.[0-7][0-9].*|1.8[0-4].*) die "Rust $RUSTV çok eski; en az 1.85 (edition 2024) gerekir: rustup update ya da pacman -Syu rust" ;;
+esac
+
 # --- Derleme ----------------------------------------------------------------------------
+[ -z "$PKG_FAILED" ] || warn "Kurulamayan paketler:$PKG_FAILED — derleme bunlar olmadan kırılırsa önce bunları kurun, sonra betiği yeniden çalıştırın."
 # --locked (güvenlik incelemesi supply-chain, 2026-10-16): yalnız depodaki Cargo.lock'un sürüm ve
 # sağlama toplamlarıyla derlenir; kilit eskiyse derleme durur, kendiliğinden yeni sürüm çekilmez.
 # Üç çalışma alanı da framework'ü yoldan kullanır; ortak hedef dizini onu tek kez derler.

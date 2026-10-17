@@ -185,6 +185,9 @@ pub struct LauncherView {
     rect: Rect,
     decimal: char,
     open: bool,
+    /// Kapandı ama yaprak henüz çökmedi: sorgu ve sonuçlar kapanış animasyonu bitince
+    /// ([`Self::release`]) bırakılır.
+    release_pending: bool,
     mode: LauncherMode,
     /// Kapalıyken istenen kip: bir sonraki açılışta uygulanır (yoksa uygulamalar).
     next_mode: Option<LauncherMode>,
@@ -237,6 +240,7 @@ impl LauncherView {
             rect: Rect::ZERO,
             decimal,
             open: false,
+            release_pending: false,
             mode: LauncherMode::Apps,
             next_mode: None,
             clipboard: Arc::default(),
@@ -371,21 +375,34 @@ impl LauncherView {
     /// Panel açıldı: istenen kip (yoksa uygulamalar), arama sıfırlanır, alan odaklanır.
     pub fn opened(&mut self, theme: &Theme, now: Instant) {
         self.open = true;
+        self.release_pending = false;
         self.mode = self.next_mode.take().unwrap_or_default();
         self.reset(theme, now);
     }
 
-    /// Panel kapandı: sorgu bellekte tutulmaz.
+    /// Panel kapanmaya başladı: odak ve onay bekleyen düğme bırakılır; içerik kapanış
+    /// animasyonu boyunca olduğu gibi kalır. Sorgu ve sonuçlar yaprak çöktüğünde
+    /// [`Self::release`] ile temizlenir. Eskiden burada temizleniyordu: kapanan yaprakta sonuç
+    /// listesinin üstüne "Sonuç yok" boş durumu biniyordu (2026-10-17, kare denetimi).
     pub fn closed(&mut self, now: Instant) {
         self.open = false;
         self.next_mode = None;
-        self.search.input_mut().set_text("");
         self.search.set_focused(false, now);
+        self.clear.cancel(now);
+        self.release_pending = true;
+    }
+
+    /// Yaprak tamamen çöktü: sorgu bellekte tutulmaz, sonuçlar ve bekleyen ikon istekleri
+    /// bırakılır. Kapanmamışsa ya da zaten bırakılmışsa bir şey yapmaz.
+    pub fn release(&mut self) {
+        if self.open || !std::mem::take(&mut self.release_pending) {
+            return;
+        }
+        self.search.input_mut().set_text("");
         self.rows.clear();
         self.row_icons.clear();
         self.icon_requests.clear();
         self.thumb_requests.clear();
-        self.clear.cancel(now);
     }
 
     /// Sorguyu yeniden çalıştırır ve listeyi kurar.
@@ -929,8 +946,39 @@ mod tests {
 
         // Kapalı başlatıcı kapalı kalır; boş sorgu boş kalır.
         v.closed(now);
+        v.release();
         v.relocalize(&theme, now);
         assert!(!v.open && v.search.text().is_empty() && !v.search.input().is_focused());
+    }
+
+    /// Kapanış kare regresyonu (2026-10-17): kapanma başlarken sorgu ve sonuçlar yerinde kalır
+    /// (kapanan yaprakta "Sonuç yok" boş durumu listenin üstüne binmez); yaprak çöktüğünde
+    /// (`release`) temizlenir. Çökmeden yeniden açılırsa temizlik açılışa bırakılır.
+    #[test]
+    fn query_and_results_survive_the_closing_animation() {
+        let theme = Theme::default();
+        let now = Instant::now();
+        let mut v = LauncherView::new(&theme, &LauncherConfig::default());
+        v.opened(&theme, now);
+        v.paste(&theme, "1+1", now);
+        let rows = v.rows.clone();
+        assert!(!rows.is_empty(), "hesap makinesi satırı");
+
+        v.closed(now);
+        assert!(!v.open && !v.search.input().is_focused());
+        assert_eq!(v.search.text(), "1+1", "kapanış boyunca sorgu yerinde");
+        assert_eq!(v.rows, rows, "kapanış boyunca sonuçlar yerinde");
+
+        v.release();
+        assert!(v.search.text().is_empty() && v.rows.is_empty(), "çökünce bırakılır");
+
+        // Kapanırken yeniden açılış: release bir şey yapmaz, açılış sıfırlar.
+        v.opened(&theme, now);
+        v.paste(&theme, "2+2", now);
+        v.closed(now);
+        v.opened(&theme, now);
+        v.release();
+        assert!(v.open && v.search.text().is_empty(), "açılış sorguyu sıfırladı, release açıkken dokunmadı");
     }
 
     fn key(k: Key) -> KeyEvent {

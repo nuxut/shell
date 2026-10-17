@@ -51,6 +51,7 @@ fn healthy() -> Facts {
         packages: Some(Packages { total: 5, ..Default::default() }),
         competitors: Vec::new(),
         clip_tools: Vec::new(),
+        gtk_links: Vec::new(),
     }
 }
 
@@ -707,6 +708,25 @@ fn look_not_owned_files_suggest_takeover() {
     assert_eq!(owned.hint.as_deref(), Some("Nuxut bu dosyayı devralabilir: Ayarlar › Görünüm (ya da nuxut-shell look apply); eski hâli yedeklenir"));
     let external = find(&r, "look", "external");
     assert!(external.text.contains("qt6ct.conf") && !external.text.contains("gtk-3.0"), "{}", external.text);
+}
+
+/// Gerçek vaka (2026-10-17): `gtk-4.0/gtk.css` Dracula'ya bağ kaldı. Rapor yolu `~` ile söyler,
+/// komut önermez; bağ yokken satır yok.
+#[test]
+fn look_gtk_links_are_reported() {
+    crate::i18n::use_turkish_for_tests();
+    let mut f = healthy();
+    let home = f.home.clone().unwrap_or_else(|| PathBuf::from("/home/u"));
+    f.home = Some(home.clone());
+    f.gtk_links = vec![home.join(".config/gtk-4.0/gtk.css")];
+    let r = evaluate(&f);
+    let c = find(&r, "look", "gtk_links");
+    assert_eq!(c.level, Level::Warn);
+    assert!(c.text.contains("~/.config/gtk-4.0/gtk.css"), "{}", c.text);
+    let all = format!("{}{}", c.text, c.hint.clone().unwrap_or_default()).to_lowercase();
+    assert!(!all.contains("sudo") && !all.contains("rm ") && !all.contains("ln "));
+    let clean = evaluate(&healthy());
+    assert!(clean.sections.iter().flat_map(|s| &s.checks).all(|c| c.id != "gtk_links"));
 }
 
 #[test]

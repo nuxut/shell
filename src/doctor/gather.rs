@@ -192,7 +192,17 @@ pub fn gather(env: &Env, live: LiveReply, probes: Probes<'_>) -> Facts {
         packages: packages(&env.pacman_db),
         competitors: competitors(&env.proc_root),
         clip_tools,
+        gtk_links: gtk_links(&env.config_home),
     }
+}
+
+/// Başka bir temaya bağ olan kullanıcı GTK CSS'leri (yalnız `lstat`; içerik okunmaz).
+fn gtk_links(config: &Path) -> Vec<PathBuf> {
+    ["gtk-4.0/gtk.css", "gtk-4.0/gtk-dark.css", "gtk-3.0/gtk.css"]
+        .iter()
+        .map(|rel| config.join(rel))
+        .filter(|p| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()))
+        .collect()
 }
 
 fn is_executable(p: &Path) -> bool {

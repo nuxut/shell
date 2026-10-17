@@ -27,6 +27,7 @@ pub mod folders;
 pub mod fonts;
 pub mod gtk;
 pub mod gtk_theme;
+pub mod gtk_watch;
 pub mod kitty;
 pub mod guard;
 pub mod oneshot;
@@ -192,6 +193,9 @@ pub struct SyncResult {
     /// Bir şey denendiyse raporu (`None`: kapalı ve etkin değil, ya da okuma hatası).
     pub report: Option<ApplyReport>,
     pub cursor_env: Vec<(String, String)>,
+    /// Doğrulama turunda (GTK dosyaları dışarıdan değişmişti) yazım oldu: başka bir araç Nuxut
+    /// dosyalarını değiştirmişti, Nuxut yeniden uyguladı (`look::gtk_watch`).
+    pub repaired: bool,
 }
 
 /// Bir tur: oku → (açıksa) planı uygula / (kapalı ve etkinse) geri yükle. Bloklayan IO; yalnızca
@@ -216,7 +220,7 @@ pub fn sync_with(
     } else {
         writer::deactivate(env, sink, &state.dirs)
     };
-    SyncResult { report, cursor_env: state.cursor_env() }
+    SyncResult { report, cursor_env: state.cursor_env(), repaired: false }
 }
 
 #[cfg(test)]

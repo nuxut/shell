@@ -67,3 +67,12 @@ polkit eylemi** `org.nuxut.system-helper.<alan>` — `exec.path` + `exec.argv1` 
   polkit eylemi `org.nuxut.system-helper.packages` (`auth_admin`). Kullanıcı tarafı
   `nuxut-shell packages install`, Ayarlar'ın "Kur" düğmesi. AUR paketi kurulmaz (kök olarak
   derlenmez); yedek/geri alma pacman'ın işi.
+- Dördüncü alan `system-look` (2026-10-17): açılış görünümü ve giriş ekranı **tek yönetici
+  onayıyla** (Hoş geldin "Sistem görünümü" adımı; iki ayrı `pkexec` yerine). Kendi polkit eylemi
+  `org.nuxut.system-helper.system-look` (`exec.argv1 = system-look`, `auth_admin`). Yeni bir yazma
+  yolu ya da yetki eklemez: argümanlar `boot-theme` ve `greeter` alanlarının kendi
+  ayrıştırıcılarından geçer (+ `--no-boot`/`--no-login`), içeride iki alan sırayla ve kendi
+  kilit/işlem kurallarıyla çalışır; her parçanın önünde `domain` olayı. Bir parça başarısız olursa
+  öbürü kendi işlemiyle kalır, çıkış 1. Kullanıcı tarafı `nuxut-shell system-look
+  status|apply|revert --json [--no-boot] [--no-login]` (`src/services/system_look.rs`; apply önce
+  `ensure_helper`). İlk kurulumda en çok iki onay: sistem dosyalarının kurulumu + uygulama.

@@ -88,6 +88,10 @@ fn main() -> ExitCode {
         return if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
     let helper = Helper { ops: Ops::new(root), bins, events: Events::stdout() };
+    if let Command::SystemLook(cmd) = &command {
+        let ok = nuxut_system_helper::system_look::run(&helper, caller(), cmd);
+        return if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     let ok = match command {
         Command::Status => {
             helper.status();
@@ -95,7 +99,7 @@ fn main() -> ExitCode {
         }
         Command::Apply(req) => helper.apply(&req),
         Command::Revert(targets) => helper.revert(&targets),
-        Command::Greeter(_) | Command::Packages(_) => false,
+        Command::Greeter(_) | Command::Packages(_) | Command::SystemLook(_) => false,
     };
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }

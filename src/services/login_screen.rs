@@ -39,7 +39,7 @@ pub fn status_at(root: &Path) -> Status {
 }
 
 /// Çalışan Hyprland'in klavye düzeni (`getoption`); doğrulanamazsa `None`.
-fn hyprland_keymap() -> Option<Keymap> {
+pub(crate) fn hyprland_keymap() -> Option<Keymap> {
     let paths = crate::services::hyprland::HyprlandPaths::from_env().ok()?;
     let client = crate::services::hyprland::HyprlandClient::new(paths.socket1);
     let get = |opt: &str| -> String {
@@ -88,7 +88,11 @@ pub fn run_cli(args: &[String]) -> ExitCode {
         "status" => {
             let st = status_at(Path::new("/"));
             if json {
-                let v = serde_json::json!({ "status": st, "helper": helper });
+                // `helper_installable`: kaynak kurulumu sistem dosyalarını hazırlamış; `apply` önce onları
+                // kurar (Hoş geldin anahtarı yardımcı yokken de açılır, 2026-10-17).
+                let installable = crate::services::system_bundle::stage_dir()
+                    .is_some_and(|s| crate::services::system_bundle::stage_state(&s) == crate::services::system_bundle::Stage::Ready);
+                let v = serde_json::json!({ "status": st, "helper": helper, "helper_installable": installable });
                 println!("{v}");
             } else {
                 println!("{}", status_text(&st, helper));

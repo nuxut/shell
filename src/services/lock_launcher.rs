@@ -303,14 +303,12 @@ mod tests {
 
     /// Sahte `nuxut-lock`: çağrıyı sayar, `gate` dosyası silinene dek çalışır.
     fn fake_lock(dir: &std::path::Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join("nuxut-lock");
         let script = format!(
             "#!/bin/sh\necho run >> '{0}/calls'\nwhile [ -e '{0}/gate' ]; do sleep 0.02; done\n",
             dir.display()
         );
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_exec::write_executable(&path, &script);
         path
     }
 
@@ -336,11 +334,9 @@ mod tests {
 
     #[test]
     fn exit_is_reported_with_code_and_signal() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nuxut-lock");
-        std::fs::write(&path, "#!/bin/sh\nexit \"$(cat \"$0.code\")\"\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_exec::write_executable(&path, "#!/bin/sh\nexit \"$(cat \"$0.code\")\"\n");
         let (tx, rx) = std::sync::mpsc::channel();
         let launcher = LockLauncher::new(Some(path.clone())).with_exit_sink(move |e| {
             let _ = tx.send(e);

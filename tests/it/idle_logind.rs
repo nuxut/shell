@@ -312,14 +312,12 @@ fn session_lock_signal_only_from_logind_for_our_session() {
 
 /// Sahte `nuxut-lock`: her çalışmada `calls`'a satır ekler, `gate` silinene dek açık kalır.
 fn fake_lock(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let path = dir.join("nuxut-lock");
     let script = format!(
         "#!/bin/sh\necho run >> '{0}/calls'\nwhile [ -e '{0}/gate' ]; do sleep 0.02; done\n",
         dir.display()
     );
-    std::fs::write(&path, script).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::support::exec::write_executable(&path, &script);
     std::fs::write(dir.join("gate"), "").unwrap();
     path
 }

@@ -105,6 +105,8 @@ pub enum ShellMessage {
     Look(crate::services::look::SyncResult),
     /// Kurulu ikon/imleç/GTK temaları değişti (yeni `themes_rev`).
     ThemesChanged(u64),
+    /// GTK yapılandırma dosyaları dışarıdan değişti (`look::gtk_watch`): doğrulama turu.
+    GtkFilesChanged,
     /// Boşta kalma: logind olayı (`services::idle::logind`).
     IdleLogind(crate::services::idle::LogindEvent),
     /// Ekran görüntüsü arka plan işi (`app/screenshot.rs`).
@@ -541,6 +543,7 @@ impl Shell {
             ShellMessage::Magnifier(v) => self.on_magnifier(cx, v),
             ShellMessage::Look(r) => self.on_look(cx, r),
             ShellMessage::ThemesChanged(_) => self.themes_changed(cx),
+            ShellMessage::GtkFilesChanged => self.gtk_files_changed(cx),
             ShellMessage::Notice(n) => self.notice(cx, n),
             ShellMessage::DisplaysPersisted => self.force_hypr_sync(cx),
             ShellMessage::Sysmon(e) => self.on_sysmon(cx, e),

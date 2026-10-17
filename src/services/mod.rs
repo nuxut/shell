@@ -46,6 +46,7 @@ pub mod sharepicker;
 pub mod shell_state;
 pub mod sysmon;
 pub mod system_bundle;
+pub mod system_look;
 pub mod system_theme;
 pub mod timezone;
 pub mod tray;

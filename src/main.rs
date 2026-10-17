@@ -74,6 +74,7 @@ fn main() -> ExitCode {
         Cli::HyprRestoreBackup => hypr_oneshot("restore-backup", |env| nuxut_shell::services::hypr_config::takeover::restore_backup(env, None)),
         Cli::SystemTheme(args) => nuxut_shell::services::system_theme::run_cli(&args),
         Cli::LoginScreen(args) => nuxut_shell::services::login_screen::run_cli(&args),
+        Cli::SystemLook(args) => nuxut_shell::services::system_look::run_cli(&args),
         Cli::Packages(args) => nuxut_shell::services::root_packages::run_cli(&args),
         Cli::Run => run(),
     }

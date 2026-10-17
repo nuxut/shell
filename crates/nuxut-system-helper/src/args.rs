@@ -6,6 +6,7 @@
 //! nuxut-system-helper boot-theme apply  [--targets grub,limine,plymouth] --scale N --lang tr|en --color rol=#rrggbb …
 //! nuxut-system-helper boot-theme revert [--targets …]
 //! nuxut-system-helper greeter status|apply|revert …   (bkz. crate::greeter)
+//! nuxut-system-helper system-look apply|revert …       (bkz. crate::system_look)
 //! ```
 
 use nuxut_boot_theme::plan::Target;
@@ -25,6 +26,8 @@ pub enum Command {
     Greeter(crate::greeter::Command),
     /// Paket alanı.
     Packages(crate::packages::Command),
+    /// Açılış görünümü + giriş ekranı tek onayla.
+    SystemLook(crate::system_look::Command),
 }
 
 fn targets(v: &str) -> Result<Vec<Target>, String> {
@@ -50,7 +53,8 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         Some("boot-theme") => {}
         Some("greeter") => return crate::greeter::parse(it).map(Command::Greeter),
         Some("packages") => return crate::packages::parse(it).map(Command::Packages),
-        _ => return Err("kullanım: nuxut-system-helper boot-theme|greeter status|apply|revert … | packages install <ad>…".into()),
+        Some("system-look") => return crate::system_look::parse(it).map(Command::SystemLook),
+        _ => return Err("kullanım: nuxut-system-helper boot-theme|greeter status|apply|revert … | system-look apply|revert … | packages install <ad>…".into()),
     }
     let verb = it.next().ok_or("eylem eksik")?;
     let mut tgt: Option<Vec<Target>> = None;
