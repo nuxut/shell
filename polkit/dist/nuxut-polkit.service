@@ -1,0 +1,24 @@
+# Nuxut polkit kimlik doğrulama ajanı — systemd kullanıcı birimi (docs/design/polkit.md).
+# install.sh kurar (ExecStart kurulum önekine göre yazılır) ve yalnızca oturumda başka bir polkit
+# ajanı (hyprpolkitagent…) yokken etkinleştirir. Oturum başında Hyprland'deki nuxut.lua /
+# nuxut.conf kancası birim ETKİNSE ortamı (WAYLAND_DISPLAY…) içe aktarıp başlatır; uwsm gibi
+# graphical-session.target'ı başlatan oturumlarda onlar başlatır. Başka ajan kayıtlıysa ajan
+# ona dokunmaz, geri çekilip bekler. shell.toml [polkit] enabled = false → kaydolmadan 0 ile çıkar.
+[Unit]
+Description=Nuxut polkit kimlik doğrulama ajanı
+Documentation=https://github.com/nuxut/shell
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nuxut-polkit
+# enabled = false ya da oturum sonu: 0 ile çıkar; yalnızca gerçek hatada yeniden başlar.
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+
+[Install]
+WantedBy=graphical-session.target

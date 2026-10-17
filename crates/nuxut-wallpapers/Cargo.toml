@@ -1,0 +1,34 @@
+[package]
+name = "nuxut-wallpapers"
+description = "Nuxut'un yerleşik duvar kağıtları: gömülü SVG'ler, kimlikler, tohum renkleri ve bellek içi render (shell, kilit ekranı ve ayarlar ortak kullanır)."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = true
+
+[dependencies]
+# SVG rasterleştirme: framework çalışma alanıyla aynı sürüm (nuxut-image üzerinden ağaçta; ek derleme
+# yok). Metin/raster özellikleri kapalı: gömülü SVG'lerde yalnız yol ve gradyan var.
+resvg = { version = "0.48", default-features = false }
+# Görünen adlar (Fluent kataloğu crate'le birlikte gelir: `i18n_source()`).
+nuxut-i18n = { version = "0.2.0-alpha.1", path = "../../../framework/crates/nuxut-i18n" }
+# Renk temaları: SVG renklerini seçili Nuxut renk temasına taşıma (`recolor_svg`, `ColorTheme::recolor`).
+nuxut-theme = { version = "0.2.0-alpha.1", path = "../../../framework/crates/nuxut-theme" }
+tracing = "0.1"
+# İsteğe bağlı: `Frame` → `nuxut_image::WallpaperFrame` (shell ve kilit; ayarlar açmaz).
+nuxut-image = { version = "0.2.0-alpha.1", path = "../../../framework/crates/nuxut-image", default-features = false, optional = true }
+
+[features]
+frame = ["dep:nuxut-image"]
+
+[dev-dependencies]
+# Ölçüm örneğinin çıktı PNG'leri (builtin_bench; ürün yolu PNG yazmaz).
+png = "0.18"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

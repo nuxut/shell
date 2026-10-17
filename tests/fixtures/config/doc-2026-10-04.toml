@@ -1,0 +1,21 @@
+# 2026-10-04 belgelenmiş örnek (git 1365003 docs/ARCHITECTURE.md), değiştirilmeden.
+[frame]
+enabled      = true
+thickness    = 6.0      # tüm kenarlar
+# top / right / bottom / left = ...   # kenar başına geçersiz kılma (opsiyonel)
+inner_radius = 20.0     # içteki köşe kavisi
+
+[bar]
+edge    = "top"         # "top" | "bottom"
+size    = 34.0
+padding = 10.0
+left    = ["workspaces"]
+center  = ["clock"]
+right   = []
+
+[workspaces]
+count      = 10
+show_empty = false
+
+[clock]
+format = "%H:%M"

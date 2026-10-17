@@ -1,0 +1,25 @@
+[package]
+name = "nuxut-config-heal"
+description = "Nuxut TOML ayar dosyalarının kendini onarması: bozuk TOML kurtarma, eski/bilinmeyen anahtar temizliği, geçersiz değer, varsayılana eşit satır, yazım hatası önerisi (shell ve Ayarlar ortak kullanır)."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = true
+
+[dependencies]
+serde = "1"
+# Shell'in ve nuxut-config'in sürümleri (ağaçta zaten var; ek derleme yok).
+toml = "1"
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+serde_ignored = "0.1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

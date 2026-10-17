@@ -1,0 +1,12 @@
+{
+    "id": 2,
+    "name": "2",
+    "monitor": "Virtual-1",
+    "monitorID": 0,
+    "windows": 2,
+    "hasfullscreen": false,
+    "lastwindow": "0x55c1cb892d10",
+    "lastwindowtitle": "main.rs - example - Code - OSS",
+    "ispersistent": false,
+    "tiledLayout": "dwindle"
+}

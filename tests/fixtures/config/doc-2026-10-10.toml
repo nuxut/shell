@@ -1,0 +1,92 @@
+# 2026-10-10 belgelenmiş örnek (git c368e3a docs/ARCHITECTURE.md); yalnız iki satır sonu yorumu sadeleştirildi.
+[frame]
+enabled      = true     # false: yalnızca bar kenarı kalır
+thickness    = 6.0      # tüm kenarlar
+# top / right / bottom / left = ...   # kenar başına geçersiz kılma (bar kenarında yalnızca bar gizliyken)
+
+[bar]
+edge    = "top"         # "top" | "bottom" | "left" | "right" (sol/sağ = dikey bar)
+size    = 34.0          # bar kalınlığı = o kenarın çerçeve kalınlığı
+padding = 10.0          # bar boyunca uçlardaki iç boşluk
+spacing = 12.0          # widget'lar arası
+start   = ["workspaces"]                          # yatay: sol, dikey: üst
+center  = ["clock"]
+end     = ["tray", "notifications", "session"]    # yatay: sağ, dikey: alt
+# widget'lar: workspaces, clock, active_window, tray, session, notifications, panel-toggle, launcher
+
+[bar.edge_actions]      # uç widget eylemleri (docs/design/bar-edge-actions.md)
+scroll_step = 5         # çentik başına %, 1..=25
+[bar.edge_actions.start]   # yatay: en sol, dikey: en üst widget; end: en sağ / en alt
+left_click  = "widget"  # widget | none | panel:left|right|top|bottom|clock|launcher | volume | mic (sessiz aç/kapa)
+right_click = "widget"
+scroll      = "widget"  # widget | none | volume | mic | brightness | workspace
+                        # ikonlu kaydırma eyleminde widget'ın dış yanında ikon yuvası baştan ayrılır
+
+[bar.widget.workspaces]
+count  = 10             # sayfa başına nokta (1..=30); her zaman bu kadar yuva
+style  = "icons"        # "icons" (uygulama glifi, yoksa numara) | "numbers" | "dots"
+scroll = "all"          # "all" | "occupied" | "off" — tekerlek/dokunmatik yüzeyle geçiş
+# tasarım: docs/design/workspaces.md
+
+[bar.widget.clock]
+format          = "%H:%M"     # yatay bar
+vertical_format = "%H\n%M"    # dikey bar (satırlara bölünür)
+
+[bar.widget.active_window]
+max_chars = 40          # en fazla grafem (8..=200); uzunsa sonu "…", tamamı ipucunda
+max_width = 360.0       # piksel sınırı; dikey bar'da gizli
+
+[bar.widget.tray]
+icon_size = 18.0
+
+[bar.widget.session]
+panel = "right"         # açtığı kenar paneli
+
+[bar.widget.notifications]
+show_zero = false
+panel     = "right"
+
+[bar.widget.panel-toggle]
+panel = "right"
+icon  = "menu"          # Material Symbols adı
+
+[panels.right]          # kenar çekmecesi: çerçeve kenarından tam boy büyür
+enabled = true
+size    = 380.0         # derinlik (sol/sağ: genişlik, üst/alt: yükseklik)
+widgets = ["session", "volume", "brightness", "network", "bluetooth", "power", "media", "notifications"]
+                        # panelde: session (oturum kartı), notifications (merkez), hızlı ayarlar:
+                        # volume, brightness, network, bluetooth, power, media (bar'a konamaz; veri yoksa gizli)
+
+[panels.left]           # varsayılan kapalı; top/bottom aynı
+enabled = false
+size    = 340.0
+widgets = []
+
+[audio]
+max_volume = 100        # ses üst sınırı, yüzde (100..=150; üstü yükseltme)
+
+[media]
+remote_art = true       # oynatıcının https kapağını indir; false: istek yok (gizlilik), yer tutucu
+
+[notifications]         # Ayarlar bu anahtarları yazar
+enabled             = true
+dnd                 = false   # rahatsız etme: critical dışı popup yok, geçmişe yazılır
+popup_timeout_ms    = 5000    # 1000..=60000
+# critical_timeout_ms = 10000 # yoksa critical kendiliğinden kapanmaz
+max_popups          = 4       # 1..=10
+history_limit       = 100     # 0..=500
+
+[launcher]              # uygulama başlatıcısı
+enabled       = true
+terminal      = []      # Terminal=true için önek argv, ör. ["kitty", "-e"]; boş: otomatik
+systemd_scope = true    # her uygulama kendi systemd kapsamında (app-nuxut-*.scope)
+calculator    = true    # ifade yazınca hesap satırı
+width         = 560.0   # 360..=900
+rows          = 8       # görünen sonuç satırı, 4..=16
+
+[notifications.apps."<app_name>"]   # uygulama başına (app_name birebir, büyük/küçük harf duyarlı)
+popups  = true          # false: popup yok, yalnızca merkez
+history = true          # false: geçmişe girmez
+
+[osd]
+timeout_ms = 1200       # ses/parlaklık OSD'sinin görünme süresi, 500..=10000

@@ -1,0 +1,27 @@
+[package]
+name = "nuxut-boot-theme"
+description = "Nuxut sistem görünümü: Plymouth, GRUB ve Limine temalarının üretimi, saf ayrıştırıcılar (mkinitcpio, Limine, plymouthd.conf) ve önizleme. UI'sız; kök yetkili yardımcı da kullanır."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Gömülü SVG'lerin (logo, kutu, ikon) PNG'ye çizimi: çalışma alanıyla aynı sürüm (ağaçta; ek derleme yok).
+# Metin ve raster görsel özellikleri kapalı: SVG'leri biz üretiyoruz, yalnız yol ve dolgu var.
+resvg = { version = "0.48", default-features = false }
+# PNG kodlama/çözme (ağaçta).
+png = "0.18"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -1,0 +1,7 @@
+# D-Bus oturum etkinleştirmesi: xdg-desktop-portal arka ucu çağırınca systemd birimi başlar
+# (systemd kullanıcı oturumu yoksa Exec doğrudan çalışır). install.sh Exec'i mutlak yola çevirir.
+# Kurulum: $XDG_DATA_HOME/dbus-1/services/ (paket: /usr/share/dbus-1/services/)
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.nuxut
+Exec=/usr/lib/xdg-desktop-portal-nuxut
+SystemdService=xdg-desktop-portal-nuxut.service

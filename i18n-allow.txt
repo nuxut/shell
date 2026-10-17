@@ -1,0 +1,84 @@
+# Gömülü metin bekçisi (ADR-0010 §4) izin listesi: 'dosya:satır gerekçe' ya da 'dosya:* gerekçe'.
+# 'geçici' satırlar aşama B'de modül modül taşınınca silinir; liste yalnızca küçülür.
+# Loglar, msg/IPC CLI yanıtları ve tanı çıktısı çevrilmez (ADR-0010 kararları).
+lock/src/cli.rs:* tanı: msg/CLI çıktısı (çevrilmez)
+lock/src/config.rs:bad() tanı: lock.toml uyarı ayrıntısı (log)
+lock/src/config.rs:warnings.push() tanı: lock.toml uyarısı (log)
+portal/src/portals_conf.rs:* tanı: üretilen nuxut-portals.conf yorumları ve ilk satır işareti (dosya içeriği; install.sh ile birebir, çevrilmez)
+src/app/commands.rs:Err() tanı: msg yanıtı (execute/target_screen hataları yalnız msg yanıtına ya da bildirim eyleminin log.una gider; çevrilmez)
+src/app/commands.rs:ok_or() tanı: msg yanıtı (config dizini yok; çevrilmez)
+src/app/commands.rs:ok_or_else() tanı: msg yanıtı (bilinmeyen monitör; çevrilmez)
+src/app/commands.rs:send() tanı: msg yanıtı (audio-diagnose; çevrilmez)
+src/app/commands.rs:Ok() tanı: msg yanıtı (config heal; çevrilmez)
+src/app/defaults.rs:send() tanı: msg komut yanıtı (çevrilmez)
+src/app/displays.rs:Err() tanı: msg yanıtı (çevrilmez)
+src/app/displays.rs:send() tanı: msg yanıtı (çevrilmez)
+src/app/osd.rs:Err() tanı: msg komut yanıtı (çevrilmez)
+src/app/power.rs:* tanı: msg komut yanıtı (çevrilmez)
+src/app/osk.rs:Err() tanı: msg osk yanıtı / log (çevrilmez)
+src/app/system.rs:Err() tanı: msg komut yanıtı (çevrilmez)
+src/config_heal/diag.rs:* tanı: msg config status/heal çıktısı ve durum dosyası baş yorumları (çevrilmez)
+src/config_heal/mod.rs:Err() tanı: msg config undo hata yanıtı / log (çevrilmez)
+src/ipc.rs:* tanı: msg/CLI çıktısı (çevrilmez)
+src/services/audio/diagnose.rs:* tanı: msg/CLI çıktısı (çevrilmez)
+src/services/displays/guard.rs:Err() tanı: display-guard CLI kullanım/hata yanıtı (çevrilmez)
+src/services/displays/guard.rs:map_err() tanı: display-guard CLI hata yanıtı (çevrilmez)
+src/services/displays/guard.rs:ok_or() tanı: display-guard CLI hata yanıtı (çevrilmez)
+src/services/displays/manager.rs:ok_or() tanı: msg/last hata ayrıntısı (çevrilmez)
+src/services/displays/manager.rs:set_last() tanı: msg JSON ayrıntısı (çevrilmez)
+src/services/displays/model.rs:map_err() tanı: Hyprland ayrıştırma hatası, msg unavailable nedeni (çevrilmez)
+src/services/displays/render.rs:push_str() tanı: üretilen Lua dosyasının pcall bildirim metni (dosya içeriği)
+src/services/displays/store.rs:Err() tanı: depo kayıt hatası, uyarı metni (log)
+src/services/displays/store.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/displays/validate.rs:Issue::new() tanı: ayrıntı metni; sözleşme IssueCode, Ayarlar çevirir
+src/services/hypr_config/control.rs:Err() tanı: hypr apply hatası, config uyarısına gider (çevrilmez)
+src/services/hypr_config/base.rs:push_str() tanı: üretilen temel katman dosyasının bölüm yorumları ve Lua pcall bildirim metni (dosya içeriği)
+src/services/hypr_config/lua.rs:String::from() tanı: üretilen Lua dosya başlığı (dosya içeriği)
+src/services/hypr_config/lua.rs:push_str() tanı: üretilen Lua pcall bildirim metni (dosya içeriği)
+src/services/look/mod.rs:ok_or() tanı: look okuma hatası, yalnızca log
+src/services/look/mod.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/look/selection.rs:w.strip_prefix() tanı: framework uyarı ön eki eşlemesi
+src/services/notifications/model.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/sysmon/mod.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/system.rs:missing() tanı: log servis adı
+src/system.rs:start() tanı: log servis adı
+src/bar_edge.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/bar_edge.rs:Err() tanı: geçersiz uç eylemi nedeni, yalnızca config uyarısına girer
+src/config.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/config.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/displays/mod.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/hypr_config/keybinds.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/hypr_config/keybinds.rs:Err() tanı: kısayol ayrıştırma nedeni, yalnızca config uyarısına girer
+src/services/hypr_config/settings.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/services/launcher/mod.rs:w.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/widgets/registry.rs:warnings.push() tanı: config uyarısı (log + msg JSON, çevrilmez)
+src/widgets/registry.rs:Some() tanı: saat biçimi geçersizlik nedeni, yalnızca config uyarısına girer
+src/services/hypr_config/keybinds.rs:ok_or_else() tanı: kısayol ayrıştırma nedeni, yalnızca config uyarısına girer
+src/services/setup.rs:Corrupt() tanı: setup.toml bozukluk nedeni, yalnızca log
+src/services/setup.rs:Err() tanı: setup.toml ayrıştırma nedeni, yalnızca log
+src/services/setup.rs:map_err() tanı: setup.toml ayrıştırma nedeni, yalnızca log
+src/services/setup.rs:ok_or() tanı: setup.toml ayrıştırma nedeni, yalnızca log
+src/services/shell_state.rs:Corrupt() tanı: shell-state.toml bozukluk nedeni, yalnızca log
+src/services/shell_state.rs:Err() tanı: shell-state.toml ayrıştırma nedeni, yalnızca log
+src/services/shell_state.rs:map_err() tanı: shell-state.toml ayrıştırma nedeni, yalnızca log
+src/services/media/art.rs:Err() tanı: kapak alınamama nedeni; arayüze gitmez (kapak yalnızca yok sayılır)
+src/services/media/art.rs:map_err() tanı: kapak alınamama nedeni; arayüze gitmez
+src/services/media/mod.rs:Err() tanı: kapak alınamama nedeni; arayüze gitmez
+src/services/tray/host.rs:note_dropped_registration() tanı: log nedeni
+portal/src/chooser/child.rs:* tanı: dosya seçici sözleşme/doğrulama nedenleri (yalnız log; kullanıcıya gösterilmez)
+portal/src/chooser/iface.rs:* tanı: dosya seçici sözleşme/doğrulama nedenleri (yalnız log; kullanıcıya gösterilmez)
+portal/src/chooser/options.rs:* tanı: dosya seçici sözleşme/doğrulama nedenleri (yalnız log; kullanıcıya gösterilmez)
+portal/src/chooser/protocol.rs:* tanı: dosya seçici sözleşme/doğrulama nedenleri (yalnız log; kullanıcıya gösterilmez)
+tools/publish/src/guard.rs:* tanı: yayın bekçisinin kural ve bulgu metinleri (geliştirici aracı, arayüz metni değil; kabuk derlemesine girmez)
+crates/nuxut-boot-theme/src/art.rs:* tanı: üretilen tema dosyası içeriği / hata ayrıntısı (önyüklemede katalog yok; dil Lang ile, docs/design/boot-theme.md)
+crates/nuxut-boot-theme/src/files.rs:* tanı: seçenek doğrulama hata ayrıntısı (kök yardımcı olayı / CLI, çevrilmez)
+crates/nuxut-boot-theme/src/grub.rs:* tanı: üretilen GRUB teması ve damla dosyası içeriği (dil Lang ile; önyüklemede katalog yok) ve doğrulama hata ayrıntısı
+crates/nuxut-boot-theme/src/limine.rs:* tanı: Limine bloğu yorumu (dosya içeriği) ve ayrıştırma hata ayrıntısı
+crates/nuxut-boot-theme/src/pf2.rs:* tanı: PF2 ayrıştırma hata ayrıntısı (çevrilmez)
+crates/nuxut-boot-theme/src/plymouth.rs:* tanı: üretilen Plymouth teması içeriği (dil Lang ile; açılışta katalog yok)
+crates/nuxut-boot-theme/src/raster.rs:* tanı: çizim hata ayrıntısı (çevrilmez)
+crates/nuxut-system-helper/src/args.rs:* tanı: kök yardımcı kullanım/girdi hatası (CLI, çevrilmez)
+crates/nuxut-system-helper/src/boot_theme.rs:* tanı: kök yardımcı olay ve hata metni (JSON olay akışı; Ayarlar türüne göre kendi kataloğundan gösterir)
+crates/nuxut-system-helper/src/manifest.rs:* tanı: bildirim dosyası doğrulama hatası (çevrilmez)
+src/services/system_theme.rs:* tanı: system-theme CLI çıktısı (install.sh planı; Ayarlar JSON'daki türleri kendi kataloğundan çevirir)
+src/services/login_screen.rs:* tanı: login-screen CLI çıktısı (install.sh; Hoş geldin --json alanlarını kendi kataloğundan çevirir)

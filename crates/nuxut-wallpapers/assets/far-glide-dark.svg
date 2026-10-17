@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" preserveAspectRatio="xMidYMid slice">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2=".35" y2="1">
+<stop offset="0" stop-color="#0f121a"/>
+<stop offset="1" stop-color="#16213a"/>
+</linearGradient>
+<linearGradient id="t" x1="1" y1="0" x2="0" y2="0">
+<stop offset="0" stop-color="#9ec5ff" stop-opacity=".24"/>
+<stop offset=".5" stop-color="#9ec5ff" stop-opacity=".08"/>
+<stop offset="1" stop-color="#9ec5ff" stop-opacity="0"/>
+</linearGradient>
+<path id="c" d="M-300 0A80 80 0 0 1-200-90A120 120 0 0 1-20-160A100 100 0 0 1 150-110A100 100 0 0 1 300 0A900 900 0 0 1-300 0Z"/>
+<path id="w" d="M-6-22A170 170 0 0 1 176-96A300 300 0 0 0-6 22Z"/>
+<path id="l" d="M-28 0A200 200 0 0 1-56 98A320 320 0 0 0 0 34A320 320 0 0 0 56 98A200 200 0 0 1 28 0Z"/>
+<g id="b">
+<path fill="#5d8fe8" d="M-76 0A76 86 0 1 0 76 0A76 86 0 1 0-76 0Z"/>
+<path fill="#f4f7ff" d="M-54-12A22 22 0 1 0-10-12A22 22 0 1 0-54-12ZM10-12A22 22 0 1 0 54-12A22 22 0 1 0 10-12Z"/>
+<path fill="#12141a" d="M-12.5 12Q0 7.6 12.5 12L0 29.6Z"/>
+</g>
+<g id="p">
+<path fill="#12141a" d="M-40.5-14.2A12.5 12.5 0 1 0-15.5-14.2A12.5 12.5 0 1 0-40.5-14.2ZM15.5-14.2A12.5 12.5 0 1 0 40.5-14.2A12.5 12.5 0 1 0 15.5-14.2Z"/>
+<path fill="#f4f7ff" d="M-28.1-19A4 4 0 1 0-20.1-19A4 4 0 1 0-28.1-19ZM28-19A4 4 0 1 0 36-19A4 4 0 1 0 28-19Z"/>
+</g>
+</defs>
+<rect width="2560" height="1440" fill="url(#g)"/>
+<g fill="#9ec5ff" fill-opacity=".045">
+<use href="#c" transform="translate(560 1235) scale(1.5 .62)"/>
+<use href="#c" transform="translate(2150 1290) scale(1.1 .5)"/>
+</g>
+<path fill="url(#t)" d="M1992 570A2300 2300 0 0 1-100 1170A2450 2450 0 0 0 1992 570Z"/>
+<g transform="translate(2010 500) rotate(-12) scale(.28)">
+<use href="#w" fill="#4a78cf" transform="translate(-62 22) scale(-1 1) rotate(10)"/>
+<use href="#l" fill="#5d8fe8" transform="translate(0 60) scale(.95)"/>
+<use href="#b"/>
+<use href="#p" transform="translate(3 -2)"/>
+<use href="#w" fill="#9ec5ff" transform="translate(62 22) rotate(18)"/>
+</g>
+</svg>

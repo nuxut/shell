@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Nuxut
+Comment=Nuxut desktop on Hyprland
+Comment[tr]=Hyprland üzerinde Nuxut masaüstü
+Exec=/usr/lib/nuxut/nuxut-session
+TryExec=Hyprland
+Type=Application
+DesktopNames=Hyprland

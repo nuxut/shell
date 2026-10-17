@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" preserveAspectRatio="xMidYMid slice">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2=".35" y2="1">
+<stop offset="0" stop-color="#f5f7fc"/>
+<stop offset="1" stop-color="#dbe5f6"/>
+</linearGradient>
+<linearGradient id="t" x1="1" y1="0" x2="0" y2="0">
+<stop offset="0" stop-color="#3f6fc6" stop-opacity=".22"/>
+<stop offset=".5" stop-color="#3f6fc6" stop-opacity=".08"/>
+<stop offset="1" stop-color="#3f6fc6" stop-opacity="0"/>
+</linearGradient>
+<path id="k" d="M351.0 86.9 A320 320 0 0 0 92.3 96.3 A340 340 0 0 1 268.0 179.1 L229.3 225.0 A220 220 0 0 0 97.5 302.7 A330 330 0 0 1 213.1 266.9 A330 330 0 0 1 189.6 385.7 A220 220 0 0 0 253.1 246.4 L347.8 148.7 L377.7 111.0 A26 26 0 0 0 351.0 86.9 Z"/>
+<path id="w" d="M377.7 111.0 A300 300 0 0 1 362.5 441.8 A330 330 0 0 0 304.1 219.7 A420 420 0 0 0 347.8 148.7 Z"/>
+</defs>
+<rect width="2560" height="1440" fill="url(#g)"/>
+<g fill="url(#t)">
+<path d="M1930 635A2200 2200 0 0 1-100 1180A2350 2350 0 0 0 1930 635Z"/>
+<path d="M1595 752A1600 1600 0 0 1-100 1350A1700 1700 0 0 0 1595 752Z" fill-opacity=".8"/>
+</g>
+<g fill="#3f6fc6">
+<g transform="translate(2010 560) scale(.5) translate(-245 -265)">
+<use href="#k" fill-opacity=".38"/><use href="#w" fill-opacity=".6"/>
+</g>
+<g transform="translate(1640 700) rotate(-10) scale(.3) translate(-245 -265)">
+<use href="#k" fill-opacity=".3"/><use href="#w" fill-opacity=".46"/>
+</g>
+</g>
+</svg>

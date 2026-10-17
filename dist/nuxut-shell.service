@@ -1,0 +1,22 @@
+# Nuxut masaüstü kabuğu — systemd kullanıcı birimi (ADR-0003 Karar 5).
+# install.sh kurar (ExecStart kurulum önekine göre yazılır). Oturum başında Hyprland'deki
+# nuxut.lua / nuxut.conf kancası ortamı içe aktarıp bu birimi başlatır; uwsm gibi
+# graphical-session.target'ı başlatan oturumlarda birim etkinleştirilmişse onlar başlatır.
+[Unit]
+Description=Nuxut masaüstü kabuğu
+Documentation=https://github.com/nuxut/shell
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nuxut-shell
+# Compositor kapanınca kabuk 0 ile çıkar; yalnızca gerçek hatada yeniden başlar.
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=5
+
+[Install]
+WantedBy=graphical-session.target

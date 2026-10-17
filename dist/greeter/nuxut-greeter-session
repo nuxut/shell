@@ -1,0 +1,49 @@
+#!/bin/sh
+# greetd `default_session` komutu: nuxut-greeter'ı Hyprland içinde çalıştırır (kullanıcı `greeter`).
+# Kurulum: /usr/lib/nuxut/nuxut-greeter-session. Ayrıntı: docs/design/greeter.md "Çalıştırma".
+set -eu
+
+# Tema ve dil: Hoş geldin adımının yayımladığı sistem kopyası (root'un, salt okunur).
+export XDG_CONFIG_HOME=/var/lib/nuxut-greeter/config
+# Palet (palette.toml) durum dizininden okunur: aynı yayımlanmış kopya.
+export XDG_STATE_HOME=/var/lib/nuxut-greeter/config
+
+runtime=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR yok (pam_systemd greeter oturumu açmadı mı?)}
+conf="$runtime/nuxut-greeter"
+mkdir -p "$conf"
+cp /usr/share/nuxut/greeter/hyprland.lua "$conf/hyprland.lua"
+
+# Sistem klavye düzeni (localectl set-x11-keymap). Değer yalnızca [a-z0-9_,:-] ise yazılır:
+# Lua dizesine kaçışsız giden metin enjeksiyon olmasın.
+layout="" variant="" options=""
+kbd=/etc/X11/xorg.conf.d/00-keyboard.conf
+if [ -r "$kbd" ]; then
+    layout=$(sed -n 's/^[[:space:]]*Option[[:space:]]*"XkbLayout"[[:space:]]*"\([^"]*\)".*/\1/p' "$kbd" | head -n 1)
+    variant=$(sed -n 's/^[[:space:]]*Option[[:space:]]*"XkbVariant"[[:space:]]*"\([^"]*\)".*/\1/p' "$kbd" | head -n 1)
+    options=$(sed -n 's/^[[:space:]]*Option[[:space:]]*"XkbOptions"[[:space:]]*"\([^"]*\)".*/\1/p' "$kbd" | head -n 1)
+fi
+valid() {
+    case $1 in
+        *[!a-z0-9_,:-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+valid "$layout" || layout=""
+valid "$variant" || variant=""
+valid "$options" || options=""
+: >"$conf/input.lua"
+if [ -n "$layout" ]; then
+    printf 'hl.config({ input = { kb_layout = "%s", kb_variant = "%s", kb_options = "%s" } })\n' "$layout" "$variant" "$options" >"$conf/input.lua"
+    # Giriş ekranı etkin düzeni gösterir, birden çok düzende geçiş düğmesi açar.
+    export NUXUT_GREETER_KB_LAYOUTS="$layout"
+fi
+
+# Ekran okuyucu: yayımlanan greeter.toml'da `screen_reader = true` ve orca kuruluysa giriş ekranı
+# açılınca orca başlar (AT-SPI veri yolu greeter oturumunun D-Bus'ından etkinleşir).
+: >"$conf/a11y.lua"
+if grep -qE '^[[:space:]]*screen_reader[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$XDG_CONFIG_HOME/nuxut/greeter.toml" 2>/dev/null \
+    && [ -x /usr/bin/orca ]; then
+    printf 'hl.on("hyprland.start", function() hl.exec_cmd("/usr/bin/orca") end)\n' >"$conf/a11y.lua"
+fi
+
+exec Hyprland --config "$conf/hyprland.lua"

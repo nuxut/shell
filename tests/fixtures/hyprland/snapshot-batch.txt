@@ -1,0 +1,436 @@
+[{
+    "id": 0,
+    "name": "Virtual-1",
+    "description": "Red Hat Inc. QEMU Monitor",
+    "make": "Red Hat, Inc.",
+    "model": "QEMU Monitor",
+    "serial": "",
+    "width": 1920,
+    "height": 1080,
+    "physicalWidth": 320,
+    "physicalHeight": 200,
+    "refreshRate": 30.00000,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 2,
+        "name": "2"
+    },
+    "specialWorkspace": {
+        "id": 0,
+        "name": ""
+    },
+    "reserved": [4, 32, 4, 4],
+    "scale": 1,
+    "transform": 0,
+    "focused": true,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "solitaryBlockedBy": ["WINDOWED","CANDIDATE"],
+    "activelyTearing": false,
+    "tearingBlockedBy": ["NOT_TORN","CANDIDATE"],
+    "directScanoutTo": "0",
+    "directScanoutBlockedBy": ["USER","SW","CANDIDATE"],
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": ["1280x800@74.99Hz","5120x2160@50.00Hz","4096x2160@50.00Hz","3840x2160@60.00Hz","3840x2160@59.94Hz","3840x2160@50.00Hz","1920x1440@60.00Hz","2560x1080@50.00Hz","1856x1392@59.99Hz","1792x1344@60.00Hz","2048x1152@60.00Hz","1920x1200@59.88Hz","1920x1080@60.00Hz","1920x1080@50.00Hz","1600x1200@60.00Hz","1680x1050@59.95Hz","1400x1050@59.98Hz","1280x1024@60.02Hz","1440x900@59.89Hz","1280x960@60.00Hz","1360x768@60.02Hz","1280x768@59.87Hz","1024x768@60.00Hz","800x600@60.32Hz","640x480@60.00Hz","640x480@59.94Hz"],
+    "colorManagementPreset": "srgb",
+    "sdrBrightness": 1,
+    "sdrSaturation": 1,
+    "sdrMinLuminance": 0.2,
+    "sdrMaxLuminance": 80,
+    "hardwareCursorsInUse": true
+}]
+
+
+[{
+    "id": 1,
+    "name": "1",
+    "monitor": "Virtual-1",
+    "monitorID": 0,
+    "windows": 2,
+    "hasfullscreen": false,
+    "lastwindow": "0x55c1c9c8b900",
+    "lastwindowtitle": "Terminal 1",
+    "ispersistent": false,
+    "tiledLayout": "dwindle"
+},{
+    "id": 2,
+    "name": "2",
+    "monitor": "Virtual-1",
+    "monitorID": 0,
+    "windows": 2,
+    "hasfullscreen": false,
+    "lastwindow": "0x55c1cb892d10",
+    "lastwindowtitle": "main.rs - example - Code - OSS",
+    "ispersistent": false,
+    "tiledLayout": "dwindle"
+},{
+    "id": 4,
+    "name": "4",
+    "monitor": "Virtual-1",
+    "monitorID": 0,
+    "windows": 2,
+    "hasfullscreen": false,
+    "lastwindow": "0x55c1c8444070",
+    "lastwindowtitle": "Terminal 2",
+    "ispersistent": false,
+    "tiledLayout": "dwindle"
+},{
+    "id": 3,
+    "name": "3",
+    "monitor": "Virtual-1",
+    "monitorID": 0,
+    "windows": 1,
+    "hasfullscreen": true,
+    "lastwindow": "0x55c1cba79b10",
+    "lastwindowtitle": "Terminal 3",
+    "ispersistent": false,
+    "tiledLayout": "dwindle"
+}]
+
+
+{
+    "address": "0x55c1cb892d10",
+    "mapped": true,
+    "hidden": false,
+    "visible": true,
+    "acceptsInput": true,
+    "at": [837, 36],
+    "size": [1075, 1036],
+    "workspace": {
+        "id": 2,
+        "name": "2"
+    },
+    "floating": false,
+    "monitor": 0,
+    "class": "code-oss",
+    "title": "main.rs - example - Code - OSS",
+    "initialClass": "code-oss",
+    "initialTitle": "Code - OSS",
+    "pid": 4242,
+    "xwayland": false,
+    "pinned": false,
+    "pinFullscreened": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "fullscreenHandler": "default",
+    "allowedOverFullscreen": true,
+    "grouped": [],
+    "tags": [],
+    "swallowing": "0x0",
+    "focusHistoryID": 0,
+    "inhibitingIdle": false,
+    "xdgTag": "",
+    "xdgDescription": "",
+    "contentType": "none",
+    "tearingHint": false,
+    "stableId": "1800e91c"
+}
+
+
+[
+    {
+        "address": "0x55c1cbb91200",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            14,
+            70
+        ],
+        "size": [
+            681,
+            996
+        ],
+        "workspace": {
+            "id": 2,
+            "name": "2"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 1",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 4,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "18000529"
+    },
+    {
+        "address": "0x55c1cba79b10",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            14,
+            70
+        ],
+        "size": [
+            1892,
+            996
+        ],
+        "workspace": {
+            "id": 3,
+            "name": "3"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 2",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 1,
+        "fullscreenClient": 1,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 1,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "18028cc3"
+    },
+    {
+        "address": "0x55c1c9c8b900",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            14,
+            70
+        ],
+        "size": [
+            943,
+            996
+        ],
+        "workspace": {
+            "id": 1,
+            "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 3",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 2,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1800022f"
+    },
+    {
+        "address": "0x55c1cb892d10",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            701,
+            70
+        ],
+        "size": [
+            1205,
+            996
+        ],
+        "workspace": {
+            "id": 2,
+            "name": "2"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "code-oss",
+        "title": "main.rs - example - Code - OSS",
+        "initialClass": "code-oss",
+        "initialTitle": "Code - OSS",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 6,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1800e91c"
+    },
+    {
+        "address": "0x55c1cbd276a0",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            14,
+            70
+        ],
+        "size": [
+            943,
+            996
+        ],
+        "workspace": {
+            "id": 4,
+            "name": "4"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 5",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 3,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1801c71b"
+    },
+    {
+        "address": "0x55c1cc144170",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            963,
+            70
+        ],
+        "size": [
+            943,
+            996
+        ],
+        "workspace": {
+            "id": 1,
+            "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 6",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 5,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1800ae8f"
+    },
+    {
+        "address": "0x55c1c8444070",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+            963,
+            70
+        ],
+        "size": [
+            943,
+            996
+        ],
+        "workspace": {
+            "id": 4,
+            "name": "4"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "kitty",
+        "title": "Terminal 7",
+        "initialClass": "kitty",
+        "initialTitle": "kitty",
+        "pid": 4242,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1801cc24"
+    }
+]

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" preserveAspectRatio="xMidYMid slice">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2=".35" y2="1">
+<stop offset="0" stop-color="#0f121a"/>
+<stop offset="1" stop-color="#16213a"/>
+</linearGradient>
+<path id="c" d="M-300 0A80 80 0 0 1-200-90A120 120 0 0 1-20-160A100 100 0 0 1 150-110A100 100 0 0 1 300 0A900 900 0 0 1-300 0Z"/>
+<path id="w" d="M-6-22A170 170 0 0 1 176-96A300 300 0 0 0-6 22Z"/>
+</defs>
+<rect width="2560" height="1440" fill="url(#g)"/>
+<use href="#c" fill="#9ec5ff" fill-opacity=".035" transform="translate(640 455) scale(.7 .42)"/>
+<use href="#c" fill="#263a62" transform="translate(1910 1215) scale(1.15 .9)"/>
+<use href="#c" fill="#1c2943" transform="translate(1913 1229) scale(1.15 .9)"/>
+<g transform="translate(1895 1040) rotate(-6) scale(.56)">
+<use href="#w" fill="#4a78cf" transform="translate(-62 22) scale(-1 1) rotate(36)"/>
+<path fill="#5d8fe8" d="M-76 0A76 86 0 1 0 76 0A76 86 0 1 0-76 0Z"/>
+<path fill="#12141a" d="M-54-12A22 22 0 0 0-10-12L-17-12A15 15 0 0 1-47-12ZM10-12A22 22 0 0 0 54-12L47-12A15 15 0 0 1 17-12ZM-12.5 12Q0 7.6 12.5 12L0 29.6Z"/>
+</g>
+<use href="#c" fill="#1c2943" transform="translate(1885 1160) scale(.5 .3)"/>
+<use href="#w" fill="#9ec5ff" transform="translate(1895 1040) rotate(-6) scale(.56) translate(62 22) rotate(40)"/>
+</svg>

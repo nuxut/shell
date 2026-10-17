@@ -1,0 +1,49 @@
+#!/bin/sh
+# Nuxut oturumu (wayland-sessions/nuxut.desktop; paket /usr/lib/nuxut/nuxut-session kurar).
+#
+# Hyprland'i başlatır. Kabuk, açıldığı ilk oturumda kullanıcının Hyprland ayarına kendi kancasını
+# ekler (`source` satırı + exec-once; docs/ARCHITECTURE.md "Kurulum") ve sonraki oturumlarda
+# Hyprland onu kendisi başlatır. Kanca henüz yoksa (paketten ilk giriş) bu oturumda kabuk bir
+# kez buradan başlatılır: Hyprland'in örneği (`hyprctl instances`; pid bu betiğin pid'i ya da
+# onun çocuğu) belirince doğru HYPRLAND_INSTANCE_SIGNATURE ve WAYLAND_DISPLAY ile.
+# Kullanıcının ayar dosyalarına bu betik yazmaz.
+set -u
+
+marker=${XDG_STATE_HOME:-$HOME/.local/state}/nuxut/hypr-source-added
+if command -v start-hyprland >/dev/null 2>&1; then
+    hypr=start-hyprland
+elif command -v Hyprland >/dev/null 2>&1; then
+    hypr=Hyprland
+else
+    echo "nuxut-session: Hyprland bulunamadı" >&2
+    exit 1
+fi
+
+if [ ! -e "$marker" ] && command -v nuxut-shell >/dev/null 2>&1; then
+    session_pid=$$
+    (
+        i=0
+        while [ "$i" -lt 150 ]; do # en çok 30 sn
+            sleep 0.2
+            i=$((i + 1))
+            found=$(hyprctl instances 2>/dev/null | awk '
+                /^instance / { sig = $2; sub(/:$/, "", sig) }
+                /^\tpid: / { pid = $2 }
+                /^\twl socket: / { print sig, pid, $3 }')
+            [ -n "$found" ] || continue
+            # Alt kabukta (boru): eşleşince 0, yoksa 1 döner.
+            echo "$found" | {
+                while read -r sig pid sock; do
+                    ppid=$(awk '{ print $4 }' "/proc/$pid/stat" 2>/dev/null)
+                    if [ "$pid" = "$session_pid" ] || [ "$ppid" = "$session_pid" ]; then
+                        HYPRLAND_INSTANCE_SIGNATURE=$sig WAYLAND_DISPLAY=$sock setsid nuxut-shell >/dev/null 2>&1 &
+                        exit 0
+                    fi
+                done
+                exit 1
+            } && break
+        done
+    ) &
+fi
+
+exec "$hypr"

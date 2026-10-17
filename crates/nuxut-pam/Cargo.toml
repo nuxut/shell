@@ -1,0 +1,34 @@
+[package]
+name = "nuxut-pam"
+description = "Nuxut kilit ekranı için minimal PAM istemcisi ve sıfırlanan şifre tamponu."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[features]
+# Yalnızca testler: `pam_start_confdir` ile geçici dizindeki servis dosyaları. Üretim ikilisi
+# bu özelliği açmaz.
+testing = []
+
+[dependencies]
+# malloc/calloc/free (PAM yanıt sahipliği), getpwuid_r, mlock, explicit_bzero. Ağaçta zaten var.
+libc = "0.2"
+zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+# FFI crate'i: unsafe yalnızca burada ve her blok `// SAFETY:` ile.
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+
+[[test]]
+name = "pam_confdir"
+required-features = ["testing"]

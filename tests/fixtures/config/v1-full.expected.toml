@@ -1,0 +1,23 @@
+# Nuxut shell ayarları (v1 biçimi: config_version yok)
+
+config_version = 2
+
+[frame]
+thickness = 4
+
+[bar]
+edge = "top"
+start = ["clock"]
+center = []
+end = ["tray", "session"]
+
+# saat biçimi
+[bar.widget.clock]
+format = "%H:%M:%S"
+
+[bar.widget.workspaces]
+count = 8
+
+# ses
+[audio]
+max_volume = 120 # yüksek

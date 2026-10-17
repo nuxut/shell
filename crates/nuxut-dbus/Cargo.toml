@@ -1,0 +1,28 @@
+[package]
+name = "nuxut-dbus"
+description = "Nuxut sistem servisi istemcileri için ortak D-Bus altyapısı (servis thread'i, ObjectManager ağacı, ad sahibi doğrulaması, sınırlı değer ayrıştırıcıları). UI'sız."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = true
+
+[dependencies]
+# Sürümler kabukla aynı (tek kopya ağaçta); varsayılan async-io yürütücüsü.
+zbus = "5.16"
+async-channel = "2"
+async-executor = "1"
+async-io = "2"
+futures-lite = "2"
+tracing = "0.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[features]
+# Yalnız testler/sahte servisler: ortamdan bus seçimi (BusKind::from_env). Ürün derlemesinde yok.
+test-support = []

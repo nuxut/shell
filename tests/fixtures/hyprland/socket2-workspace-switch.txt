@@ -1,0 +1,8 @@
+activewindow>>kitty,Terminal 1
+activewindowv2>>55c1c9c8b900
+workspace>>1
+workspacev2>>1,1
+activewindow>>code-oss,main.rs - example - Code - OSS
+activewindowv2>>55c1cb892d10
+workspace>>2
+workspacev2>>2,2

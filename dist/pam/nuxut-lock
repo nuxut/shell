@@ -1,0 +1,4 @@
+#%PAM-1.0
+# Nuxut kilit ekranı (nuxut-lock). Yalnız kimlik doğrulama; hesap politikası oturum açılışına aittir
+# (docs/ARCHITECTURE.md "Kilit ekranı"). Paket /etc/pam.d/nuxut-lock olarak kurar.
+auth include login

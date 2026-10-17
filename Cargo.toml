@@ -1,0 +1,172 @@
+[workspace]
+# Kilit ekranı ve polkit ajanı: PAM FFI ayrı crate'te yalıtılır; unsafe yalnızca orada.
+# Portal arka ucu: UI'sız küçük ikili.
+# Giriş ekranı (greeter): greetd istemcisi, kilitle aynı görünüm (docs/adr/0010-login-screen.md).
+# D-Bus altyapısı, NetworkManager ve BlueZ istemcileri: UI'sız iç crate'ler, Ayarlar ile paylaşılır
+# (docs/design/network-settings.md). nuxut-wallpapers: yerleşik duvar kağıtları.
+members = [".", "crates/nuxut-pam", "crates/nuxut-dbus", "crates/nuxut-nm", "crates/nuxut-bluez", "crates/nuxut-power", "crates/nuxut-wallpapers", "crates/nuxut-config-heal", "crates/nuxut-boot-theme", "crates/nuxut-system-helper", "greeter", "lock", "polkit", "portal"]
+resolver = "3"
+
+[package]
+name = "nuxut-shell"
+description = "Nuxut Hyprland masaüstü kabuğu."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = true
+
+[[bin]]
+name = "nuxut-shell"
+path = "src/main.rs"
+
+# Ekran paylaşım seçicisi: xdph `screencopy:custom_picker_binary` (docs/design/screenshare-picker.md).
+[[bin]]
+name = "nuxut-sharepicker"
+path = "src/bin/nuxut-sharepicker.rs"
+
+# Dosya seçici: portal FileChooser isteği başına (docs/design/file-chooser.md).
+[[bin]]
+name = "nuxut-filechooser"
+path = "src/bin/nuxut-filechooser.rs"
+
+[features]
+# Yalnızca canlı görsel test: framework DataControl gelene dek başlatıcının pano kipini
+# önceden doldurulmuş sahte kaynakla gösterir (`NUXUT_CLIPBOARD_DEMO=1`). Ürün derlemesinde kapalı.
+clipboard-demo = []
+
+[dependencies]
+nuxut-core = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-core" }
+nuxut-config = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-config" }
+nuxut-motion = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-motion" }
+# a11y: AT-SPI ekran okuyucu adaptörü (framework ADR-0011); at-spi yoksa kurulmaz, Orca yokken ağaç kurulmaz.
+nuxut = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut", features = ["a11y"] }
+# Takvim daemon'unun D-Bus sözleşmesi (yalnızca zbus + serde; ağ/DB yok).
+nuxut-calendar-ipc = { version = "0.2.0-alpha.1", path = "../calendar/crates/nuxut-calendar-ipc" }
+# Bildirim görsellerini arka planda çözüp kart boyutuna küçültme (Loader). JXL yok: işçi
+# framework'teki ayrı paket (nuxut-image-worker), JXL çözücüsü kabuk ağacına girmez (ADR-0007).
+nuxut-image = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-image", default-features = false, features = ["render"] }
+# ADR-0007: güvenilmeyen görselin ayrı, kısıtlı süreçte çözümü (Sandbox + işçi).
+nuxut-image-sandbox = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-image-sandbox" }
+# Medya kapakları: SSRF-güvenli HTTP istemcisi (yalnızca genel internet, https, boyut/süre sınırlı).
+nuxut-net = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-net" }
+# Birleşik görünüm (ADR-0004): GTK/Qt için iki kipli Material rol kümesi (Palette::generate).
+# default-features = false: görsel çözme (`image` özelliği: nuxut-image + jxl, framework 5c912ce) shell'e
+# girmez — bildirim görsel çözücüsü güvenilmeyen girdi alır, JXL açılmamalı (`cargo tree -i jxl-oxide`: yok).
+nuxut-palette = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-palette", default-features = false }
+# Klasör ikonlarının renk taşıması (HCT; look::folders). Framework'ün sürüm ve özellikleriyle aynı:
+# ağaçta zaten var, ek derleme yok.
+material-colors = { version = "0.4.2", default-features = false, features = ["std"] }
+# Dış/kendi config yazımlarının tek katmanı (shell ADR-0001): atomik yazıcı, ortam
+# kapısı, snapshot/geri yükleme, kilit. Cephe yeniden dışa aktarmaz.
+nuxut-apply = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-apply" }
+# Sistem servisi istemcileri (UI'sız, bu depoda; Ayarlar da kullanır): ortak D-Bus altyapısı,
+# NetworkManager, BlueZ, UPower/ppd. Hata metinleri kabukta çevrilir (services/{network,bluetooth}.rs, system.rs).
+nuxut-dbus = { version = "0.2.0-alpha.1", path = "crates/nuxut-dbus" }
+nuxut-nm = { version = "0.2.0-alpha.1", path = "crates/nuxut-nm" }
+nuxut-bluez = { version = "0.2.0-alpha.1", path = "crates/nuxut-bluez" }
+nuxut-power = { version = "0.2.0-alpha.1", path = "crates/nuxut-power" }
+# Yerleşik duvar kağıtları (gömülü SVG, bellek içi render; kilit ekranı ve ayarlar da kullanır).
+nuxut-wallpapers = { version = "0.2.0-alpha.1", path = "crates/nuxut-wallpapers", features = ["frame"] }
+# Sistem görünümü (Plymouth/GRUB/Limine): saf üretici + önizleme ve kök yardımcının olay/argüman
+# sözleşmesi (UI'sız iç crate'ler; `nuxut-shell system-theme`, docs/design/boot-theme.md).
+nuxut-boot-theme = { version = "0.2.0-alpha.1", path = "crates/nuxut-boot-theme" }
+nuxut-system-helper = { version = "0.2.0-alpha.1", path = "crates/nuxut-system-helper" }
+# Dosya seçici: portal ile ortak sözleşme (chooser::protocol). Lib adı framework nuxut-portal ile
+# çakışmasın diye yeniden adlandırılır; portal crate'i UI'sız (zbus + serde, ağaçta var).
+nuxut-portal-backend = { version = "0.2.0-alpha.1", package = "xdg-desktop-portal-nuxut", path = "portal" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# shell.toml widget tabloları ([bar.widget.<ad>]) ham tablo olarak okunur; nuxut-config ile aynı sürüm.
+toml = "1"
+# shell.toml sürüm göçü (ADR-0002): yorum, sıra ve bilinmeyen anahtarları koruyarak düzenleme.
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+# Ayar dosyalarının kendini onarması (docs/design/config-migrations.md): saf çekirdek, Ayarlar da kullanır.
+nuxut-config-heal = { version = "0.2.0-alpha.1", path = "crates/nuxut-config-heal" }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std", "unstable-locales"] }
+# "Güncelleme bitti" bildirimi: shell-state.toml `last_version` ile CARGO_PKG_VERSION'ı SemVer
+# önceliğiyle karşılaştırmak (ağaçta zaten vardı).
+semver = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+# D-Bus (logind, StatusNotifier/DBusMenu, bildirim sunucusu). Varsayılan async-io yürütücüsü;
+# servisler kendi thread'lerinde çalışır, ana döngüye MessageSender ile döner.
+zbus = "5.16"
+# Yalnızca sürüm sabiti (kodda kullanılmaz): zbus'ın iş parçacığı havuzu. 1.7.0'da boştaki havuz
+# thread'leri hiç çıkmıyor ve 500 ms'de bir uyanıyor (thread başına 2/sn, süreç ömrü boyunca);
+# 1.6.2'de 500 ms boşta kalan thread çıkar. Tüm çalışma alanı (kilit, polkit, portal) bu sürümü
+# alır. Ölçüm: docs/research/perf-2026-10.md.
+blocking = "=1.6.2"
+# Bildirim gövdesi bağlantıları: WHATWG URL ayrıştırma + şema/host doğrulaması.
+url = "2"
+# image-path dosyasını O_NOFOLLOW ile bir kez açıp fstat/fstatfs; zbus zaten getiriyor.
+rustix = { version = "1.1", features = ["fs", "event", "net", "param", "process"] }
+# Tepsi servisinin yürütücüsü (zbus'un geçişli bağımlılıkları; ek derleme maliyeti yok).
+async-channel = "2"
+async-executor = "1"
+async-io = "2"
+futures-lite = "2"
+pipewire = "0.10"
+i2cdev = "0.6"
+zeroize = "1"
+# Etkin pencere başlığını grafem sınırında kırpma; cosmic-text üzerinden zaten ağaçta.
+unicode-segmentation = "1.13"
+# Bulanık arama (helix/nucleo); grafem kümelemesi (unicode-segmentation) gerekmez, indeksler karakter.
+nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-casefold", "unicode-normalization"] }
+# Ekran görüntüsü PNG kodlama; image üzerinden zaten ağaçta (ek derleme yok).
+png = "0.18"
+# Gece ışığı: gün batımı/doğumu (saf Rust, yalnızca chrono; kutup günü/gecesinde None).
+sunrise = "3"
+# Ekran klavyesi: gömülü xkb keymap'inden tuş etiketleri (aynı keymap sanal klavyeye
+# gider). Framework runtime'ı (nuxut-wayland) aynı sürümü zaten bağlıyor; ek derleme yok.
+xkbcommon = { version = "0.8", default-features = false }
+# VM pano köprüsü: Xwayland CLIPBOARD seçimi (XFixes olayları, saf Rust X11 istemcisi;
+# libxcb/libX11 gerekmez). docs/DEPENDENCIES.md, docs/design/vm-clipboard.md.
+x11rb = { version = "0.13", features = ["xfixes", "res"] }
+# Açılış görünümü önizlemesinin geçici dizini (rastgele ad, yalnız-yoksa mkdir, 0700; güvenlik
+# incelemesi 2026-10-17). Ağaçta zaten var (dev ve dolaylı bağımlılık).
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"
+# Ağ kapağı başarı testleri: TLS sahte sunucu + test CA (yalnızca testlerde).
+nuxut-net = { path = "../framework/crates/nuxut-net", features = ["test-support"] }
+# Test kimlikleri (OutputId::for_test gece ışığı arka uç sırası; SurfaceId::for_test duvar kağıdı yüzeyi).
+nuxut = { path = "../framework/crates/nuxut", features = ["test-util"] }
+# Sahte NM/BlueZ ile canlı test anahtarı (bus_from_env) ve examples/fake_*: yalnız testlerde.
+nuxut-nm = { path = "crates/nuxut-nm", features = ["test-support"] }
+nuxut-bluez = { path = "crates/nuxut-bluez", features = ["test-support"] }
+nuxut-power = { path = "crates/nuxut-power", features = ["test-support"] }
+# examples/at_probe (düşmanca AT güvenlik testi, 2026-10-17): accesskit_unix'in zaten çektiği
+# atspi proxy'leri ve async-io; ürüne girmez.
+atspi = { version = "0.29", default-features = false, features = ["proxies"] }
+async-io = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+
+# Disk: hata ayıklama bilgisi yalnızca satır tabloları (backtrace'te dosya:satır kalır);
+# bağımlılıklarda hiç yok. Eşzamanlı çok sayıda çalışma ağacında target dizinleri onlarca GB'a çıkıyordu.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+# Yerleşik duvar kağıdı render'ı (resvg + bant kırıcı) geliştirme derlemesinde de hızlı: opt-level 0'da
+# 1080p ~0,8 sn, 2'de ~50 ms (ölçüm docs/design/wallpapers.md).
+[profile.dev.package.nuxut-wallpapers]
+opt-level = 2

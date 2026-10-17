@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2560 1440" preserveAspectRatio="xMidYMid slice">
+<defs>
+<linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#cddff9"/>
+<stop offset=".6" stop-color="#e6eefb"/>
+<stop offset="1" stop-color="#f5f7fc"/>
+</linearGradient>
+<radialGradient id="h" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1700 1500) scale(1900 520)">
+<stop offset="0" stop-color="#ffffff" stop-opacity=".7"/>
+<stop offset=".5" stop-color="#ffffff" stop-opacity=".25"/>
+<stop offset=".78" stop-color="#ffffff" stop-opacity=".06"/>
+<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+</radialGradient>
+<g id="k">
+<path d="M351.0 86.9 A320 320 0 0 0 92.3 96.3 A340 340 0 0 1 268.0 179.1 L229.3 225.0 A220 220 0 0 0 97.5 302.7 A330 330 0 0 1 213.1 266.9 A330 330 0 0 1 189.6 385.7 A220 220 0 0 0 253.1 246.4 L347.8 148.7 L377.7 111.0 A26 26 0 0 0 351.0 86.9 Z M377.7 111.0 A300 300 0 0 1 362.5 441.8 A330 330 0 0 0 304.1 219.7 A420 420 0 0 0 347.8 148.7 Z"/>
+</g>
+</defs>
+<rect width="2560" height="1440" fill="url(#s)"/>
+<rect width="2560" height="1440" fill="url(#h)"/>
+<g fill="#2f5fb8">
+<use xlink:href="#k" transform="translate(1900 420) scale(.36) translate(-245 -265)" fill-opacity=".44"/>
+<use xlink:href="#k" transform="translate(1715 525) rotate(-11) scale(.2) translate(-245 -265)" fill-opacity=".3"/>
+<use xlink:href="#k" transform="translate(1815 648) rotate(9) scale(.14) translate(-245 -265)" fill-opacity=".23"/>
+<use xlink:href="#k" transform="translate(1590 668) rotate(-4) scale(.09) translate(-245 -265)" fill-opacity=".17"/>
+<use xlink:href="#k" transform="translate(1688 772) rotate(15) scale(.06) translate(-245 -265)" fill-opacity=".13"/>
+</g>
+</svg>

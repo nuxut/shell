@@ -1,0 +1,44 @@
+[package]
+name = "xdg-desktop-portal-nuxut"
+description = "Nuxut xdg-desktop-portal arka ucu (Settings: görünüm; FileChooser: dosya seçici)."
+version = "0.2.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = true
+
+[lib]
+name = "nuxut_portal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xdg-desktop-portal-nuxut"
+path = "src/main.rs"
+
+[dependencies]
+# Tema token'ları: framework.toml + palette.toml → çözülmüş kip, primary, hareket, birleşik
+# görünüm (runtime ile aynı yükleyici; UI/renderer yok).
+nuxut-theme = { version = "0.2.0-alpha.1", path = "../../framework/crates/nuxut-theme" }
+# config_dir + inotify dizin izleyicisi (ConfigWatcher).
+nuxut-config = { version = "0.2.0-alpha.1", path = "../../framework/crates/nuxut-config" }
+zbus = "5.16"
+# poll(2) iki inotify tanımlayıcısında (ağaçta var).
+rustix = { version = "1.1", features = ["event"] }
+# Dosya seçici: portal ↔ nuxut-filechooser JSON sözleşmesi (ağaçta var).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Seçici sonucunu async yöntemde beklemek (zbus'un çektiği; ek derleme yok).
+async-channel = "2"
+futures-lite = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

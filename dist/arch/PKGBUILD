@@ -1,0 +1,126 @@
+# Maintainer: Hakan Göksu <hakan@goksu.me>
+#
+# AUR paketi `nuxut-git`: Nuxut kabuğu, kilit ekranı, polkit ajanı, portal arka ucu, Ayarlar ve
+# takvim servisi tek pakette. Kaynak: github.com/nuxut/{framework,shell,settings,calendar}
+# (yol bağımlılıkları yan yana klon ister). Bağımlılık adları docs/DEPENDENCIES.md'deki Arch
+# adlarıdır. Süreç ve tasarım: docs/design/packaging.md.
+
+pkgname=nuxut-git
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc="Nuxut: a desktop shell for Hyprland written in Rust (shell, lock screen, settings, calendar)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/nuxut/shell"
+license=('MIT')
+depends=(
+  'hyprland'
+  'wayland' 'libxkbcommon' 'xkeyboard-config' 'mesa' 'libglvnd' 'fontconfig'
+  'dbus' 'systemd' 'pam' 'polkit'
+  'pipewire' 'wireplumber'
+  'xdg-desktop-portal' 'xdg-desktop-portal-gtk'
+  'ca-certificates'
+  'inter-font' 'adobe-source-serif-fonts' 'ttf-jetbrains-mono-nerd' 'ttf-material-symbols-variable'
+)
+makedepends=('git' 'cargo' 'clang' 'pkgconf')
+optdepends=(
+  'networkmanager: network section and Wi-Fi/VPN quick settings'
+  'bluez: Bluetooth section'
+  'upower: battery indicator'
+  'power-profiles-daemon: power profile selector'
+  'mpv: video wallpapers'
+  'grim: screenshots'
+  'wl-clipboard: copy screenshots to the clipboard'
+  'xdg-utils: open links and files from notifications'
+  'noto-fonts-emoji: colour glyphs in the emoji picker'
+  'ddcutil: external monitor brightness (DDC/CI udev rule; needs i2c-dev)'
+  'vimix-cursors: default cursor theme of the unified look'
+  'papirus-icon-theme: default icon theme of the unified look'
+  'gnome-keyring: Secret Service for online account tokens (or kwallet)'
+)
+provides=('nuxut')
+conflicts=('nuxut')
+source=(
+  'framework::git+https://github.com/nuxut/framework.git'
+  'shell::git+https://github.com/nuxut/shell.git'
+  'settings::git+https://github.com/nuxut/settings.git'
+  'calendar::git+https://github.com/nuxut/calendar.git'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+# Kurulan ikililer: /usr/bin (PATH) ve /usr/lib/nuxut (yardımcılar; kabuk çalışan ikiliye göreli
+# ../lib/nuxut altında arar).
+_bins=(nuxut-shell nuxut-lock nuxut-polkit nuxut-settings nuxut-calendard)
+_helpers=(xdg-desktop-portal-nuxut nuxut-filechooser nuxut-sharepicker nuxut-image-worker)
+
+pkgver() {
+  cd shell
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  export RUSTUP_TOOLCHAIN=stable
+  for r in framework shell settings calendar; do
+    (cd "$r" && cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')")
+  done
+}
+
+build() {
+  export RUSTUP_TOOLCHAIN=stable
+  # Dört çalışma alanı framework'ü yoldan kullanır; ortak hedef dizini onu bir kez derler.
+  export CARGO_TARGET_DIR="$srcdir/target"
+  (cd shell && cargo build --frozen --release \
+    -p nuxut-shell -p nuxut-lock -p nuxut-polkit -p xdg-desktop-portal-nuxut)
+  cargo build --frozen --release --manifest-path framework/Cargo.toml -p nuxut-image-worker
+  (cd settings && cargo build --frozen --release)
+  (cd calendar && cargo build --frozen --release -p nuxut-calendard)
+}
+
+check() {
+  # Kurulacak her ikili derlendi mi (eksik ikili sessizce paketlenmesin).
+  for b in "${_bins[@]}" "${_helpers[@]}"; do
+    [ -x "$srcdir/target/release/$b" ] || { echo "eksik ikili: $b" >&2; return 1; }
+  done
+}
+
+package() {
+  local rel="$srcdir/target/release"
+  for b in "${_bins[@]}"; do
+    install -Dm755 "$rel/$b" "$pkgdir/usr/bin/$b"
+  done
+  for h in "${_helpers[@]}"; do
+    install -Dm755 "$rel/$h" "$pkgdir/usr/lib/nuxut/$h"
+  done
+  install -Dm755 shell/dist/session/nuxut-session "$pkgdir/usr/lib/nuxut/nuxut-session"
+
+  # systemd kullanıcı birimleri (repo dosyaları ev dizini kurulumuna göre; paket yolları).
+  local units="$pkgdir/usr/lib/systemd/user"
+  install -dm755 "$units"
+  sed 's#^ExecStart=.*#ExecStart=/usr/bin/nuxut-shell#' shell/dist/nuxut-shell.service > "$units/nuxut-shell.service"
+  sed 's#^ExecStart=.*#ExecStart=/usr/bin/nuxut-polkit#' shell/polkit/dist/nuxut-polkit.service > "$units/nuxut-polkit.service"
+  sed 's#^ExecStart=.*#ExecStart=/usr/lib/nuxut/xdg-desktop-portal-nuxut#' \
+    shell/dist/portal/xdg-desktop-portal-nuxut.service > "$units/xdg-desktop-portal-nuxut.service"
+  install -Dm644 calendar/dist/nuxut-calendard.service "$units/nuxut-calendard.service"
+
+  # D-Bus etkinleştirmeleri ve portal kaydı.
+  local dbus="$pkgdir/usr/share/dbus-1/services"
+  install -dm755 "$dbus"
+  sed 's#^Exec=.*#Exec=/usr/lib/nuxut/xdg-desktop-portal-nuxut#' \
+    shell/dist/portal/org.freedesktop.impl.portal.desktop.nuxut.service \
+    > "$dbus/org.freedesktop.impl.portal.desktop.nuxut.service"
+  install -Dm644 calendar/dist/org.nuxut.Calendar1.service "$dbus/org.nuxut.Calendar1.service"
+  install -Dm644 shell/dist/portal/nuxut.portal "$pkgdir/usr/share/xdg-desktop-portal/portals/nuxut.portal"
+
+  # Kilit ekranının PAM servisi (yoksa kilit `login` servisine düşer ve uyarı loglar).
+  install -Dm644 shell/dist/pam/nuxut-lock "$pkgdir/etc/pam.d/nuxut-lock"
+
+  # Oturum girdisi ve uygulama girdileri.
+  install -Dm644 shell/dist/session/nuxut.desktop "$pkgdir/usr/share/wayland-sessions/nuxut.desktop"
+  install -Dm644 settings/dist/nuxut-settings.desktop "$pkgdir/usr/share/applications/nuxut-settings.desktop"
+  install -Dm644 settings/dist/nuxut-welcome.desktop "$pkgdir/usr/share/applications/nuxut-welcome.desktop"
+  install -Dm644 calendar/dist/nuxut-calendar-webcal.desktop \
+    "$pkgdir/usr/share/applications/nuxut-calendar-webcal.desktop"
+  install -Dm644 settings/dist/icons/hicolor/scalable/apps/nuxut-settings.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/nuxut-settings.svg"
+
+  install -Dm644 shell/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

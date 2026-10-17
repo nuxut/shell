@@ -1,0 +1,23 @@
+# Nuxut portal arka ucu (docs/design/portal.md). Etkinleştirilmez: D-Bus ile başlar.
+# Kurulum: $XDG_CONFIG_HOME/systemd/user/ (paket: /usr/lib/systemd/user/). install.sh ExecStart'ı
+# mutlak yola çevirir.
+[Unit]
+Description=Nuxut portal arka ucu (görünüm ayarları)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.impl.portal.desktop.nuxut
+ExecStart=/usr/lib/xdg-desktop-portal-nuxut
+Restart=on-failure
+RestartSec=2
+# Yalnızca okur (framework.toml, palette.toml) ve oturum bus'ı konuşur. ProtectSystem=full:
+# izleyici eksik config/durum dizinini oluşturabilsin (strict ev dizinini de salt okunur yapar).
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+MemoryHigh=32M

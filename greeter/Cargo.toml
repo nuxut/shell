@@ -1,0 +1,45 @@
+[package]
+name = "nuxut-greeter"
+description = "Nuxut giriş ekranı (greetd istemcisi)."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "nuxut-greeter"
+path = "src/main.rs"
+
+[dependencies]
+# Görünüm, duvar kağıdı, avatar çözümü ve kilit ekranının durum satırları kilitle ortak
+# (aynı çalışma alanı; ek derleme yok). PAM'i greetd yapar; nuxut-pam yalnızca sıfırlanan
+# şifre tamponu (SecretBuf) ve süreç sertleştirmesi için.
+nuxut-lock = { path = "../lock" }
+nuxut-pam = { path = "../crates/nuxut-pam" }
+# a11y: AT-SPI ağacı (ekran okuyucu giriş ekranında da çalışsın; ADR-0011).
+nuxut = { path = "../../framework/crates/nuxut", features = ["a11y"] }
+nuxut-wallpapers = { path = "../crates/nuxut-wallpapers", features = ["frame"] }
+# greetd IPC'si JSON (shell ile aynı sürümler).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+zeroize = "1"
+# logind güç eylemleri (kilitle aynı).
+zbus = "5.16"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

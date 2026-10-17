@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Nuxut kök yetkili sistem yardımcısı (ADR-0008, docs/design/boot-theme.md).
+  Kurulum: /usr/share/polkit-1/actions/ (paket ya da install.sh'ın system-theme seçeneği).
+  Her alan ayrı eylem: pkexec ikiliyi exec.path + exec.argv1 ile eşler; "boot-theme" dışındaki
+  bir ilk argüman bu eylemle yetki almaz. Giriş ekranı (greeter) kendi alanıyla aşağıda.
+  auth_admin (keep yok): önyükleyiciye dokunan her uygulama ayrı onay ister.
+-->
+<policyconfig>
+  <vendor>Nuxut</vendor>
+  <vendor_url>https://github.com/nuxut</vendor_url>
+
+  <action id="org.nuxut.system-helper.boot-theme">
+    <description>Change the boot appearance (Plymouth, GRUB, Limine)</description>
+    <description xml:lang="tr">Önyükleme görünümünü değiştir (Plymouth, GRUB, Limine)</description>
+    <message>Authentication is required to apply or revert the Nuxut boot theme</message>
+    <message xml:lang="tr">Nuxut önyükleme temasını uygulamak ya da geri almak için yönetici parolası gerekiyor</message>
+    <icon_name>preferences-desktop-theme</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/nuxut/nuxut-system-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">boot-theme</annotate>
+  </action>
+
+  <action id="org.nuxut.system-helper.greeter">
+    <description>Change the login screen</description>
+    <description xml:lang="tr">Giriş ekranını değiştir</description>
+    <message>Authentication is required to switch the login screen to Nuxut or back</message>
+    <message xml:lang="tr">Giriş ekranını Nuxut'a geçirmek ya da geri almak için yönetici parolası gerekiyor</message>
+    <icon_name>system-users</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/nuxut/nuxut-system-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">greeter</annotate>
+  </action>
+</policyconfig>

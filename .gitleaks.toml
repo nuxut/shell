@@ -1,0 +1,7 @@
+# gitleaks: varsayılan kurallar + bilinen test verisi (sır değil; yayın hattı ikinci göz olarak çalıştırır).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Örnek verisi: sentetik WireGuard anahtarları (okunur ASCII metnin base64 hâli)"
+regexes = ['''bnV4dXQtd2lyZWd1YXJkLXRlc3Qt[A-Za-z0-9+/=]+''']

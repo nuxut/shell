@@ -1,4 +1,0 @@
-singleton SystemStatService SystemStatService.qml
-singleton NotificationService NotificationService.qml
-singleton AudioService AudioService.qml
-singleton BrightnessService BrightnessService.qml
