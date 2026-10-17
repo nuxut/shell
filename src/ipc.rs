@@ -22,7 +22,7 @@
 //! snapshot list [--setting <ayar>] [--limit <1-200>] | snapshot show <kimlik>
 //! snapshot restore <kimlik> [--force] [--setting <ayar>]
 //! setup status | setup <done|skip> <1-65535>
-//! look <status|plan>
+//! look <status|plan> | look restart-app <uygulama>
 //! idle <status|inhibit|uninhibit|toggle>
 //! lock
 //! night-light <status|on|off|toggle> | night-light temperature <1500-6000>
@@ -459,13 +459,17 @@ fn parse_defaults_set(role: &str, id: &str) -> Result<DefaultsCommand, String> {
     Ok(DefaultsCommand::Set { role: role.to_owned(), id: id.to_owned() })
 }
 
-/// `look …` alt komutları (salt okunur; dış yazım `nuxut-apply` ile gelecek).
+/// `look …` alt komutları: `status`/`plan` salt okunur; `restart-app` canlı yenilenmeyen bir
+/// uygulamayı yeni renklerle yeniden başlatır.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LookCommand {
     /// Seçimler, çözülmüş temalar, Qt yolu, eksik paketler, çakışmalar (tek satır JSON).
     Status,
     /// Birleşik görünüm açıkken yazılacak parçalar ve canlı eylemler (tek satır JSON).
     Plan,
+    /// Canlı yenilenmeyen uygulamayı yeni renklerle yeniden başlat (bildirim düğmesi;
+    /// `services::look::app_refresh`).
+    RestartApp(crate::services::look::app_refresh::App),
 }
 
 pub const HELP: &str = "\
@@ -487,7 +491,7 @@ komutlar:
   snapshot list [--setting <ayar>] [--limit <1-200>] | snapshot show <kimlik>
   snapshot restore <kimlik> [--force] [--setting <ayar>]
   setup status | setup <done|skip> <1-65535>
-  look <status|plan>
+  look <status|plan> | look restart-app <uygulama>
   idle <status|inhibit|uninhibit|toggle>
   lock
   settings open <sayfa>
@@ -595,7 +599,11 @@ pub fn parse(line: &str) -> Result<Command, String> {
         ["setup", ..] => return Err("kullanım: setup status | setup <done|skip> <1-65535>".into()),
         ["look", "status"] if output.is_none() => Command::Look(LookCommand::Status),
         ["look", "plan"] if output.is_none() => Command::Look(LookCommand::Plan),
-        ["look", ..] => return Err("kullanım: look <status|plan>".into()),
+        ["look", "restart-app", id] if output.is_none() => match crate::services::look::app_refresh::App::parse(id) {
+            Some(app) => Command::Look(LookCommand::RestartApp(app)),
+            None => return Err(format!("bilinmeyen uygulama: {}", clip(id))),
+        },
+        ["look", ..] => return Err("kullanım: look <status|plan|restart-app <uygulama>>".into()),
         ["idle", "status"] if output.is_none() => Command::Idle(IdleCommand::Status),
         ["idle", "inhibit"] if output.is_none() => Command::Idle(IdleCommand::Inhibit(Toggle::On)),
         ["idle", "uninhibit"] if output.is_none() => Command::Idle(IdleCommand::Inhibit(Toggle::Off)),
@@ -795,6 +803,9 @@ pub enum Cli {
     /// Giriş ekranı (greetd + nuxut-greeter): `login-screen status|apply|revert …`
     /// (`services::login_screen`; yazma kök yardımcının `greeter` alanında, pkexec ile).
     LoginScreen(Vec<String>),
+    /// Önerilen resmî depo paketleri: `packages install <ad>…` (`services::root_packages`; kurulum
+    /// kök yardımcının `packages` alanında, pkexec ile).
+    Packages(Vec<String>),
     Help,
     Version,
 }
@@ -811,6 +822,7 @@ kullanım:
   nuxut-shell hypr restore-backup  en yeni yedeği geri koyar (o anki dosya yedeklenir; JSON)
   nuxut-shell system-theme …  önyükleme görünümü (Plymouth/GRUB/Limine): status|preview|apply|revert
   nuxut-shell login-screen …  giriş ekranı (greetd + nuxut-greeter): status|apply|revert
+  nuxut-shell packages install <ad>…  önerilen resmî depo paketlerini yönetici onayıyla kur
   nuxut-shell --help | --version";
 
 /// `doctor` argümanları: yalnız `--json`.
@@ -847,6 +859,7 @@ pub fn parse_cli<I: IntoIterator<Item = String>>(args: I) -> Result<Cli, String>
         Some("look") => Err(format!("kullanım: look <apply|revert> (durum için: msg look status)\n{USAGE}")),
         Some("system-theme") => Ok(Cli::SystemTheme(args[1..].to_vec())),
         Some("login-screen") => Ok(Cli::LoginScreen(args[1..].to_vec())),
+        Some("packages") => Ok(Cli::Packages(args[1..].to_vec())),
         Some("-h" | "--help" | "help") => Ok(Cli::Help),
         Some("-V" | "--version") => Ok(Cli::Version),
         Some(other) => Err(format!("bilinmeyen argüman \"{}\"\n{USAGE}", clip(other))),
@@ -943,6 +956,8 @@ mod tests {
         assert!(parse("hypr").is_err() && parse("hypr reload").is_err() && parse("hypr status --output DP-1").is_err());
         assert_eq!(ok("look status"), Command::Look(LookCommand::Status));
         assert_eq!(ok("look plan"), Command::Look(LookCommand::Plan));
+        assert_eq!(ok("look restart-app nautilus"), Command::Look(LookCommand::RestartApp(crate::services::look::app_refresh::App::Nautilus)));
+        assert!(parse("look restart-app firefox").is_err() && parse("look restart-app").is_err());
         assert_eq!(ok("idle status"), Command::Idle(IdleCommand::Status));
         assert_eq!(ok("idle inhibit"), Command::Idle(IdleCommand::Inhibit(Toggle::On)));
         assert_eq!(ok("idle uninhibit"), Command::Idle(IdleCommand::Inhibit(Toggle::Off)));

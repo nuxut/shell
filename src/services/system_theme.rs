@@ -291,6 +291,13 @@ fn event_text(e: &Event) -> Option<String> {
             }
         }
         Event::LoginScreen { .. } => return None,
+        Event::PackagesResult { outcome, names, message } => {
+            let o = if *outcome == Outcome::Applied { "kuruldu" } else { "KURULAMADI" };
+            match message {
+                Some(m) => format!("[paketler] {} {o}: {m}", names.join(" ")),
+                None => format!("[paketler] {} {o}", names.join(" ")),
+            }
+        }
         Event::LoginStep { step, state } => format!("[giriş ekranı] {step}: {}", if matches!(state, nuxut_system_helper::events::StepState::Start) { "başladı" } else { "tamam" }),
         Event::LoginResult { outcome, message } => {
             let o = match outcome {

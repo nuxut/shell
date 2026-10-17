@@ -167,6 +167,8 @@ struct MenuState {
     session: MenuRequest,
     /// Geçerli açılış için en az bir ağaç yayınlandı mı.
     answered: bool,
+    /// Geçerli açılışın ilk okumasının üst üste başarısızlıkları (yeniden deneme bütçesi).
+    failures: u32,
 }
 
 impl MenuState {
@@ -176,6 +178,7 @@ impl MenuState {
         self.open = true;
         self.session = session;
         self.answered = false;
+        self.failures = 0;
         self.about_to_show = true;
         self.pending = Some(0);
         self.emit_due = None;
@@ -949,6 +952,8 @@ impl Runtime {
 
     fn on_menu_fetched(&mut self, id: &ItemId, session: MenuRequest, parent: i32, result: zbus::Result<LayoutReply>) {
         let Some(i) = self.index(id) else { return };
+        let attempts = self.options.initial_read_attempts.max(1);
+        let retry = self.options.retry_delay;
         let s = &mut self.items[i];
         let menu = &mut s.menu;
         if menu.session != session {
@@ -966,12 +971,25 @@ impl Runtime {
                 tracing::debug!(id = %s.id, parent, "tepsi: menü okunamadı: {e}");
                 // Açılışın ilk yanıtı alınamadı (zaman aşımı/hata): önceki açılıştan kalan ağaç
                 // varsa o gösterilsin; UI bu açılışı sonsuza dek beklemesin.
-                if !menu.answered
-                    && let Some(tree) = menu.tree.clone()
-                {
+                if menu.answered {
+                    return;
+                }
+                if let Some(tree) = menu.tree.clone() {
                     menu.answered = true;
                     let event = TrayEvent::MenuLayout { item: s.id.clone(), request: session, menu: tree };
                     self.emit(event);
+                    return;
+                }
+                // Gösterilecek ağaç hiç yok: öğe okumasıyla aynı bütçe ve geri çekilmeyle yeniden
+                // denenir (`AboutToShow` tekrarlanmaz). Eskiden tek zaman aşımı (yük altında
+                // donma, meşgul uygulama) açılışı sonsuza dek cevapsız bırakıyordu: tıklanan menü
+                // hiç açılmıyordu (2026-10-17).
+                menu.failures += 1;
+                if menu.failures < attempts && !is_gone(&e) {
+                    menu.request(parent);
+                    menu.fetch.at(Instant::now() + retry * 2u32.saturating_pow(menu.failures - 1));
+                } else {
+                    tracing::info!(id = %s.id, attempts = menu.failures, "tepsi: menü okunamadı, açılış bırakıldı: {e}");
                 }
                 return;
             }

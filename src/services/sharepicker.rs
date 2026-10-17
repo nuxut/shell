@@ -272,9 +272,80 @@ impl PickerArgs {
     }
 }
 
+/// Oturum kilidine göre seçicinin ne yapabileceği (logind `LockedHint`; 2026-10-17).
+///
+/// **Kapalı-güvenli (2026-10-17, güvenlik incelemesi):** yalnız logind'den okunmuş, oturumumuza ait
+/// `LockedHint = false` kilitsiz sayılır. Kilitli, bilinmeyen ya da okunamayan durum (logind yok,
+/// oturum çözülemedi, D-Bus hatası, bağlantı koptu, [`LOCK_DEADLINE`] içinde yanıt yok) kilitli
+/// kabul edilir: istek reddedilir (seçim yazılmadan çıkılır, xdph iptal sayar) ve hiçbir pencere
+/// yakalanmaz. İlk yanıt beklenirken önizleme istenmez, "Paylaş" işlemez.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LockGate {
+    #[default]
+    Unknown,
+    Unlocked,
+    Locked,
+}
+
+/// İlk logind yanıtı için en uzun bekleme; dolarsa durum bilinmiyor = kilitli.
+pub const LOCK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl LockGate {
+    /// logind anlık görüntüsünden kapı durumu: yalnız okunmuş "kilitsiz" açar.
+    pub fn from_logind(available: bool, has_session: bool, locked_hint: bool) -> Self {
+        if available && has_session && !locked_hint {
+            Self::Unlocked
+        } else {
+            Self::Locked
+        }
+    }
+
+    /// [`LOCK_DEADLINE`] doldu: hâlâ bilinmiyorsa kilitli.
+    pub fn after_deadline(self) -> Self {
+        match self {
+            Self::Unknown => Self::Locked,
+            other => other,
+        }
+    }
+
+    /// Pencere önizlemesi yakalanabilir.
+    pub fn previews_allowed(self) -> bool {
+        self == Self::Unlocked
+    }
+
+    /// Seçim kabul edilebilir.
+    pub fn share_allowed(self) -> bool {
+        self == Self::Unlocked
+    }
+
+    /// İstek reddedilmeli (seçici kapanır).
+    pub fn must_reject(self) -> bool {
+        self == Self::Locked
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_gate_fails_closed_when_locked_unknown_or_unreadable() {
+        let unknown = LockGate::default();
+        assert!(!unknown.previews_allowed() && !unknown.share_allowed() && !unknown.must_reject());
+        let locked = LockGate::from_logind(true, true, true);
+        assert_eq!(locked, LockGate::Locked);
+        assert!(!locked.previews_allowed() && !locked.share_allowed() && locked.must_reject());
+        let open = LockGate::from_logind(true, true, false);
+        assert!(open.previews_allowed() && open.share_allowed() && !open.must_reject());
+        // Kapalı-güvenli: logind yok, oturum çözülemedi, okunamadı → kilitli, reddet.
+        assert_eq!(LockGate::from_logind(false, false, false), LockGate::Locked);
+        assert_eq!(LockGate::from_logind(false, true, false), LockGate::Locked, "logind düştü");
+        assert_eq!(LockGate::from_logind(true, false, false), LockGate::Locked, "oturum yok");
+        // Yanıt gelmedi (zaman aşımı): bilinmiyor → kilitli; bilinen durum değişmez.
+        assert!(LockGate::Unknown.after_deadline().must_reject());
+        assert_eq!(LockGate::Unlocked.after_deadline(), LockGate::Unlocked);
+        assert_eq!(LockGate::from_logind(true, false, true), LockGate::Locked);
+    }
 
     fn entry(id: &str, class: &str, title: &str, addr: &str) -> String {
         format!("{id}[HC>]{class}[HT>]{title}[HE>]{addr}[HA>]")

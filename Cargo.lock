@@ -1953,6 +1953,7 @@ dependencies = [
  "fontconfig-parser",
  "glow",
  "nuxut-core",
+ "rustix",
  "swash",
  "sys-locale",
  "thiserror",

@@ -25,7 +25,7 @@ const SWITCH_BURST: &str = include_str!("../fixtures/hyprland/socket2-workspace-
 use nuxut_shell::services::hyprland::SNAPSHOT_COMMAND as BATCH;
 const CLIENTS: &str = include_str!("../fixtures/hyprland/clients.json");
 
-const WAIT: Duration = Duration::from_secs(3);
+const WAIT: Duration = crate::support::WAIT;
 /// Sahte sunucuyla konuşan istemcinin istek süresi. Ürün varsayılanı (1 sn) gerçek compositor
 /// içindir; yük altında sahte sunucunun thread'i geç planlanır ve istek EAGAIN ile düşerdi
 /// (`client_dispatch_sends_typed_command`, 2026-10-15). Zaman aşımını sınayan test kendi

@@ -124,9 +124,8 @@ PKG_FONTS="ttf-jetbrains-mono-nerd inter-font adobe-source-serif-fonts"
 # adw-gtk-theme: Nuxut GTK temasının tabanı (canlı GTK3 renkleri; docs/design/look-gtk.md).
 PKG_LOOK="vimix-cursors papirus-icon-theme xdg-desktop-portal xdg-desktop-portal-gtk adw-gtk-theme"
 # Material Symbols ikon fontu (resmî depo, 2026-10-16: AUR -git yerine; aynı aile "Material Symbols
-# Rounded"). AUR -git sürümü kuruluysa dokunulmaz: aynı dosya adları pacman -S'yi bozardı.
+# Rounded"). AUR -git sürümü kuruluysa dokunulmaz (genel kural: pkg_missing, -git/-bin varyantı).
 PKG_ICONS="ttf-material-symbols-variable"
-PKG_ICONS_ALT="ttf-material-symbols-variable-git"
 # İsteğe bağlı imleç seti (--with-cursors): Ayarlar'daki imleç seçiminde görünürler.
 # Capitaine resmî depoda; diğerleri yalnız AUR'da: betik kurmaz, "AUR'da, kendiniz kurun" der.
 PKG_CURSORS_REPO="capitaine-cursors"
@@ -281,6 +280,41 @@ say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mHATA:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# >>> paket-seçimi (tests/fixtures/install_pkgs.sh bu bloğu sahte pacman/sudo ile ayrı çalıştırır)
+# Eksik paketler `pacman -T` ile bulunur: provides'ı dikkate alır (ör. AUR'dan kurulu
+# adw-gtk-theme-git `provides=adw-gtk-theme` ise karşılanmış sayılır). `pacman -S --needed <ad>`
+# provides'a bakmaz; çakışan varyantı kaldırmayı sorar ve kurulumu durdururdu (2026-10-17).
+# Provides etmeyen ama aynı adın -git/-bin varyantı kuruluysa paket atlanır (aynı dosyalar
+# çakışırdı; ör. ttf-material-symbols-variable-git). Eksik yoksa pacman -S ve sudo hiç çağrılmaz.
+# Sonuç PKG_NEED'de (boşlukla ayrılmış); atlananlar not olarak yazılır.
+pkg_variant() { # $1 paket → kurulu -git/-bin varyantının adı (yoksa 1 döner)
+    for s in -git -bin; do
+        if pacman -Qq "$1$s" >/dev/null 2>&1; then printf '%s\n' "$1$s"; return 0; fi
+    done
+    return 1
+}
+pkg_missing() { # paketler → PKG_NEED
+    PKG_NEED=""
+    [ "$#" -gt 0 ] || return 0
+    # pacman -T: hepsi karşılanmışsa 0, değilse 127 ve eksikleri satır satır yazar.
+    miss=$(pacman -T "$@" 2>/dev/null) || true
+    for p in $miss; do
+        if v=$(pkg_variant "$p"); then
+            note "$p: zaten $v kurulu, atlandı"
+        else
+            PKG_NEED="${PKG_NEED:+$PKG_NEED }$p"
+        fi
+    done
+}
+pkg_install() { # paketler → yalnız eksikleri kurar; hepsi varsa pacman -S/sudo çağrılmaz
+    pkg_missing "$@"
+    [ -n "$PKG_NEED" ] || { note "paketler tamam"; return 0; }
+    note "kurulacak: $PKG_NEED"
+    # shellcheck disable=SC2086
+    sudo pacman -S --needed --noconfirm $PKG_NEED
+}
+# <<< paket-seçimi
 
 ask() { # ask "soru" → 0 evet, 1 hayır
     [ "$ASSUME_YES" = 1 ] && return 0
@@ -900,7 +934,16 @@ if [ "$DRY_RUN" = 1 ]; then
     note "kaynaklar: $SRC · dal: $BRANCH · paketler: $([ "$DEPS" = 1 ] && echo evet || echo hayır) · hyprland: $HYPR"
     if [ "$DEPS" = 1 ] && [ "$ACTION" = install ]; then
         note "paket listesi: $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK"
+        if command -v pacman >/dev/null 2>&1; then
+            # pacman -T salt okunur; sudo çağrılmaz.
+            # shellcheck disable=SC2086
+            pkg_missing $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK
+            note "[deneme] kurulurdu: ${PKG_NEED:-hiçbiri (hepsi kurulu)}"
+        fi
         [ "$CURSORS" = 1 ] && note "imleç seti: $PKG_CURSORS_REPO · AUR: $PKG_CURSORS_AUR"
+    fi
+    if [ "$ACTION" = install ] && [ "$HYPR" != no ] && [ "$HYPRLAND_TAKEOVER" = 1 ]; then
+        note "[deneme] Hyprland ana ayarı devralınırdı: $BIN/nuxut-shell hypr takeover (yedek: hyprland.*.nuxut-yedek-TARİH; geri: --hypr-restore)"
     fi
     note "birimler: $CONF/systemd/user/{nuxut-shell,nuxut-polkit,nuxut-calendard}.service"
     other=$(other_polkit_agent) && note "polkit: başka ajan var ($other); nuxut-polkit etkinleştirilmezdi" || note "polkit: nuxut-polkit.service etkinleştirilirdi"
@@ -1018,27 +1061,23 @@ fi
 # --- Paketler ---------------------------------------------------------------------------
 if [ "$DEPS" = 1 ]; then
     if [ "$IS_ARCH" = 1 ]; then
-        say "Paketler (pacman --needed; yönetici parolası istenir)"
-        note "$PKG_BUILD $PKG_FONTS $PKG_LOOK"
+        say "Paketler"
         # Rust: rustup varsa onu kullan, yoksa Arch'ın 'rust' paketi.
         RUST_PKG=""
         command -v rustup >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1 || RUST_PKG=rust
-        ICONS=$PKG_ICONS
-        pacman -Qi $PKG_ICONS_ALT >/dev/null 2>&1 && ICONS=""
         # shellcheck disable=SC2086
-        sudo pacman -S --needed --noconfirm $PKG_BUILD $PKG_FONTS $ICONS $PKG_LOOK $RUST_PKG
+        pkg_install $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK $RUST_PKG
         # AUR paketleri incelenmemiş PKGBUILD'lerdir (güvenlik incelemesi supply-chain, 2026-10-16):
         # betik AUR yardımcısı (paru/yay) ÇAĞIRMAZ. Kurulu olanlar yalnız `pacman -Qi` ile algılanır;
         # yalnız AUR'da olanlar için "kendiniz kurun" denir ve o özellik atlanır.
         if [ "$CURSORS" = 1 ]; then
             say "İmleç seti"
             # shellcheck disable=SC2086
-            sudo pacman -S --needed --noconfirm $PKG_CURSORS_REPO || warn "$PKG_CURSORS_REPO kurulamadı."
-            missing_aur=""
-            for p in $PKG_CURSORS_AUR; do
-                pacman -Qi "$p" >/dev/null 2>&1 || missing_aur="$missing_aur $p"
-            done
-            [ -z "$missing_aur" ] || note "Şu imleç paketleri AUR'da, kendiniz kurun (PKGBUILD'i inceleyerek):$missing_aur — kurulmadıkça Ayarlar'da görünmezler."
+            pkg_install $PKG_CURSORS_REPO || warn "$PKG_CURSORS_REPO kurulamadı."
+            # shellcheck disable=SC2086
+            pkg_missing $PKG_CURSORS_AUR
+            missing_aur=$PKG_NEED
+            [ -z "$missing_aur" ] || note "Şu imleç paketleri AUR'da, kendiniz kurun (PKGBUILD'i inceleyerek): $missing_aur — kurulmadıkça Ayarlar'da görünmezler."
         fi
     else
         warn "Arch dışı sistem: paketleri kendiniz kurun (Arch adları): $PKG_BUILD $PKG_FONTS $PKG_ICONS $PKG_LOOK rust"
@@ -1393,12 +1432,13 @@ else
     # Ana ayarın devralınması (ADR-0007) yalnızca açık istekle (--hyprland-takeover); kurulum ve
     # güncelleme bunu kendiliğinden ASLA yapmaz (2026-10-16). İlk kurulumda kullanıcı onayını Hoş
     # geldin alır. Ana ayar Nuxut'u göstermiyorsa (başında 'nuxut: managed main config' işareti
-    # yoksa) benzersiz yedek + Hyprland doğrulamasından geçmiş yeni ana dosya; kendi satırlarınız
-    # user.conf/user.lua'da, en son okunur. Geri: --hypr-restore.
+    # yoksa) benzersiz yedek + Hyprland doğrulamasından geçmiş yeni ana dosya. Eski ayardan
+    # taşınanlar (env/envd satırları; input, cursor, xwayland, render, opengl, device) ayrı
+    # user-migrated.conf'a yazılır ve Nuxut ayarlarından önce okunur; exec-once satırları,
+    # kısayollar ve pencere kuralları taşınmaz (raporda listelenir). Sonradan kendi satırlarınız
+    # user.conf/user.lua'da, en son okunur. Geri: --hypr-restore. --dry-run planı yukarıda yazar.
     if [ "$HYPRLAND_TAKEOVER" = 1 ]; then
-        if [ "$DRY_RUN" = 1 ]; then
-            note "[deneme] Hyprland ana ayarı devralınır: $BIN/nuxut-shell hypr takeover (yedek: hyprland.*.nuxut-yedek-TARİH)"
-        elif out=$("$BIN/nuxut-shell" hypr takeover </dev/null 2>&1); then
+        if out=$("$BIN/nuxut-shell" hypr takeover </dev/null 2>&1); then
             note "Hyprland ana ayarı: $(printf '%s' "$out" | tr -d '\n' | sed 's/  */ /g')"
         else
             warn "Hyprland ana ayarı devralınamadı (eski dosya yerinde): $(printf '%s' "$out" | tr -d '\n' | sed 's/  */ /g')"

@@ -35,6 +35,7 @@ pub mod network;
 pub mod night_light;
 pub mod notifications;
 pub mod portal_env;
+pub mod root_packages;
 pub mod power;
 pub mod removable_media;
 pub mod safe_file;

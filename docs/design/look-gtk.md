@@ -50,13 +50,27 @@ Kullanıcı: "GTK hiç değişmiyor". Gerçek makinede iki neden:
 canlı uygular). Yüzey renkleri için uygulama yeniden açılmalı (`restart_needed: gtk4_colors`).
 Gerçek Nautilus 51 / libadwaita 1.10 ile ölçüldü (2026-10-17, izole oturum): açık pencere de,
 son pencere kapanınca arka planda kalan `--gapplication-service` süreci de eski CSS'i tutar;
-yeni renkler `nautilus -q` ve yeniden açınca gelir. libadwaita 1.10 hem `--window-bg-color` gibi
+yeni renkler yeniden açınca gelir (Nuxut bunu aşağıdaki gibi kendisi yapar). libadwaita 1.10 hem `--window-bg-color` gibi
 CSS değişkenlerini hem `@define-color`'ı uygular; `gtk.css` sembolik bağsa izlenir.
 Nautilus'ta görünen yüzeyler içerik ve kenar çubuğudur (`view_bg`/`sidebar_bg` →
 `surface_container_low`, ADR-0004 §5.1). Elle yazılmış tema yüzeylerinde (`framework.toml
 [colors]`) bu rol tohumun nötr tonunda kalıyordu (Dracula'da `#191c20`, varsayılan Adwaita
 koyusuyla neredeyse aynı); artık token'ı olmayan yüzey basamakları temanın üç yüzeyinden kurulur
 (`look/palette.rs` `fit_surface_ramp`).
+
+**Canlı yenilenmeyen uygulamalar** (2026-10-17; `src/services/look/app_refresh.rs`): kullanıcıya
+`nautilus -q` gibi komut yazdırılmaz. `look.mode` (renkler) yazılınca, canlı eylem kapısı açıksa
+(test/ikincil örnekte değil) her listedeki uygulama için arka planda: çalışmıyorsa iş yok; açık
+penceresi yoksa (Hyprland `j/clients`, sınıfa göre) arka plan süreci GApplication'ın kendi `quit`
+eylemiyle (`org.gtk.Actions.Activate`) kapatılır — süreç öldürülmez, bir sonraki açılış yeni
+renklerle gelir; açık penceresi varsa ya da pencereler bilinemiyorsa popup bildirim "‹Uygulama›
+yeni renkleri yeniden açılınca alacak" ve "Şimdi yeniden başlat" düğmesi (`msg look restart-app
+<kimlik>`: `quit`, ad bırakılınca — en çok 20 sn — `org.freedesktop.Application.Activate` ile D-Bus
+etkinleştirmesi, yeni pencere). Liste `App::ALL`; bugün yalnız Nautilus (`org.gnome.Nautilus`).
+Yeni uygulama bus adı, nesne yolu, pencere sınıfı ve bildirim adıyla eklenir. Yalıtılmış oturumda
+gerçek Nautilus 51 ile doğrulandı (`examples/app_refresh_probe.rs`): yalnız arka plan süreci
+kapandı (ad ~10 sn'de bırakıldı); pencereli süreç yerinde kaldı, yeniden başlatma yeni süreç ve
+pencere açtı.
 
 **Devralma (varsayılan; kullanıcı ilkesi 2026-10-16 "Nuxut yapabiliyorsa varsayılan Nuxut"):**
 `writer::ApplyBackend` `nuxut-apply`'dan `ExternallyManaged { reason }` alınca, neden

@@ -4,6 +4,11 @@
 //! test edilebilir çekirdeği içerir (config, geometri, model, servisler); `main.rs` bunları
 //! runtime'a bağlar.
 
+/// Testlerin tek canlılık sınırı (entegrasyon testleriyle aynı dosya).
+#[cfg(test)]
+#[path = "../tests/support/liveness.rs"]
+pub(crate) mod test_liveness;
+
 pub mod app;
 pub mod bar_damage;
 pub mod bar_edge;

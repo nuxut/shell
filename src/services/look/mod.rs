@@ -19,6 +19,7 @@
 //! Buradaki IO yalnızca okuma ve küçük: `framework.toml` / `palette.toml` (sınırlı),
 //! `environment.d` taraması, tema dizinlerinde var/yok yoklaması.
 
+pub mod app_refresh;
 pub mod backend;
 pub mod catalog;
 pub mod env;

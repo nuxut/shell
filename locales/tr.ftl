@@ -3020,3 +3020,17 @@ shell-a11y-filechooser-files = Dosyalar
 
 # Nerede: Ekran okuyucu — dosya türü filtresi açılır seçiminin adı; görünmez, sesli okunur.
 shell-a11y-filechooser-filter = Dosya türü
+
+# Nerede: Renk değişince yeniden açılması gereken uygulamanın adı; bildirim başlığında ve gövdesinde $app olarak (src/app/look.rs). Anlam: GNOME Dosyalar uygulaması (Nautilus).
+shell-look-app-nautilus = Dosyalar
+
+# Nerede: Renkler değişince, uygulamanın açık penceresi varken gösterilen bildirimin başlığı (src/app/look.rs). Anlam: Uygulama yeni renkleri yeniden açılınca alacak.
+# Değişkenler: $app (uygulamanın adı, ör. "Dosyalar").
+shell-look-app-restart-title = { $app } yeni renkleri yeniden açılınca alacak
+
+# Nerede: Aynı bildirimin gövdesi (src/app/look.rs). Anlam: Uygulama renkleri yalnız açılışta okuyor; düğme onu yeniden başlatır, açık pencereleri kapanır.
+# Değişkenler: $app (uygulamanın adı).
+shell-look-app-restart-body = { $app } renkleri yalnız açılırken okuyor. Şimdi yeniden başlatırsan açık pencereleri kapanıp yeniden açılır.
+
+# Nerede: Aynı bildirimdeki düğme (src/app/look.rs). Anlam: Uygulamayı şimdi kapatıp yeniden açar.
+shell-look-app-restart-now = Şimdi yeniden başlat

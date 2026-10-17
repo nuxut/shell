@@ -2167,3 +2167,44 @@ kullanır; ayrı crate'ler (`polkit`, `nuxut-wallpapers`, `nuxut-pam`, `lock`) a
 yerel fonksiyonla uygular. Kaynak tarayan bekçiler (`no_hardcoded_*`, `mascot_placement`, i18n
 `source_guard`) taranan `.rs` sayısı `MIN_SHELL_SOURCES`'un altındaysa başarısız olur: boş/yanlış
 ağaçta sessiz yeşil yok.
+
+### Testlerde zaman: koşul bekle, süre varsayma (2026-10-17)
+
+**Hata:** `audio_service`, kamera (`unattributed_and_renamed_opens_fail_closed`) ve tepsi testleri
+iniş turlarında ara sıra düşüyordu. **Kök neden:** kısa duvar saati sınırları: PipeWire
+araçlarına `timeout 5`, kamera/tepsi/takvim beklemelerine 3–5 sn, "bu sürede gelenleri topla"
+pencereleri (tepsi 1.5 sn), "hızlı kapandı" iddiaları (0.5–2 sn), tanı raporunun ürün içi 900 ms
+`wpctl` sınırı. Testler derleme slice'ında düşük öncelikle ve CPU kotasıyla çalışır; bellek bekçisi
+(`mem-watch`) baskıda slice'ı ~1 sn'lik art arda dondurur. Donan süreç (test, özel
+PipeWire/D-Bus, servis thread'i) çözüldüğünde son tarih çoktan geçmiş olur. **Kanıt:** turun
+scope'u 1–1.5 sn dondurulup 0.2–0.8 sn çözülerek (bekçi benzetimi) eski ikililerle 6 turun 2'si
+kırmızı: tanı raporu `(wpctl zaman aşımı)` ve tepsi sınır testi 63/64 öğe. Yalnız CPU yarışında
+(tek çekirdeğe sıkıştırma, ~10× yavaşlama) eski sürüm de yeşil: ses ve kamerada kök neden süre
+sınırı, ürün yarışı değil.
+
+**Gerçek ürün hatası (tepsi, düzeltildi):** sınırlar genişletilince donma benzetimi tepside
+cevapsız menü açılışlarını ortaya çıkardı: önceki ağaç yokken menünün ilk `GetLayout` okuması
+zaman aşımına uğrarsa (donma, meşgul uygulama) hiçbir şey yayınlanmıyor, yeniden de
+denenmiyordu; tıklanan tepsi menüsü hiç açılmıyordu. Artık ilk okuma öğe okumasıyla aynı bütçe
+ve geri çekilmeyle (`initial_read_attempts`, `retry_delay`) yeniden denenir, `AboutToShow`
+tekrarlanmaz. Test: `first_menu_read_timeout_is_retried` (düzeltmesiz sürümde menü hiç gelmez).
+Test seçenekleri ürün varsayılanına çekildi (çağrı 2 sn, 4 deneme; eskiden 400 ms × 2).
+
+**Doğrulama:** aynı donma benzetimiyle (her turda tam lib paketi yük olarak + 2× `audio_service` +
+2× kamera + tepsi paketi paralel, derleme slice'ında) yeni kodla 20/20 tur yeşil.
+
+**Kural:**
+- Beklemeler olay/koşul bekler; üst sınır tek kaynaktır: `tests/support/liveness.rs`
+  `LIVENESS` (120 sn; entegrasyon testlerinde `support::WAIT`, birim testlerinde
+  `crate::test_liveness::LIVENESS`). Başarılı koşunun süresi bundan etkilenmez.
+- "Takılmadan bitti" iddiaları `PROMPT` (10 sn) ile ölçülür; koruduğu durum (takılı D-Bus
+  çağrısı, sonsuz bekleyen thread) bunun çok üstünde kalacak şekilde kurulur (ör. tepsi
+  `unresponsive_apps_cannot_block_the_service`: çağrı zaman aşımı `3 × PROMPT`).
+- Sabit süreli toplama yalnız "şu olmamalı" denetimi içindir (kısa pencere; donma onu yalnız
+  zayıflatır, kırmaz). "Şu gelmeli" bekleyen her şey koşul bekler (`collect_until`, `eventually`).
+- Dış araç çağrıları (`pw-dump`, `wpctl`…) kendi süre sınırını `LIVENESS`'tan alır; sorgu
+  döngüsündeki geçici başarısızlık yeniden denenir.
+- Bilinen sınır (ürün, düzeltilmedi): ses yazımında hedef, gidiş-dönüş bittikten 1 sn
+  (`SETTLE`) sonra sunucu değerine bırakılır; kabuk 1 sn'den uzun donup çözülürse yankı
+  işlenmeden bırakılabilir ve o anda gelen tek bir göreli adım eski değerden hesaplanır.
+  Kendiliğinden düzelir (sonraki yankı), masaüstünde 1 sn'lik donma gerektirir.

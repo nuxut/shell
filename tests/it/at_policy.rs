@@ -44,3 +44,18 @@ fn granting_surfaces_publish_no_assistive_actions() {
         }
     }
 }
+
+/// Ekran klavyesi gerçek girdi üretir (sanal klavye odaktaki yüzeye, kilitliyse kilit ekranına
+/// yazar): tuşları AT'ye her zaman eylemsiz (`docs/design/osk.md` "Ekran okuyucu ve gerçek girdi").
+#[test]
+fn osk_keys_never_take_assistive_actions() {
+    let view = std::fs::read_to_string(repo_path("src/osk_view.rs")).unwrap();
+    let start = view.find("pub fn access(&self, tree: &mut AccessTree, osk: &Osk)").expect("KeyboardView::access yok");
+    let body = &view[start..start + view[start..].find("\n    }\n").expect("gövde sonu")];
+    for action in ["clickable", ".action(", "Action::Click", "Increment"] {
+        assert!(!body.contains(action), "ekran klavyesi tuşu AT eylemi sunuyor: {action}");
+    }
+    // AT eylemi işleyicisi klavye yüzeyine bir şey yapmaz: ekran klavyesi modülünde AT isteği yok.
+    let app = std::fs::read_to_string(repo_path("src/app/osk.rs")).unwrap();
+    assert!(!app.contains("AccessRequest") && !app.contains("accessibility_action"), "ekran klavyesi AT eylemi işliyor");
+}

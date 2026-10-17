@@ -126,8 +126,8 @@ yok). Kabuk düşerse compositor sanal klavyeyi yok eder ve basılı tuşları b
   - `[osk] reserve_space = true` yanaşıkken eski yüzeyi kullanır (yalnızca alt anchor, kendi
     boyutu, exclusive zone): sürüklerken kip geçişinde boyut ve exclusive zone değişir (ayrı
     commit; bir karelik sıçrama olabilir) — isteğe bağlı kip için kabul edildi.
-  - Fare ve dokunma aynı yoldan: framework birincil dokunmayı işaretçi olarak öykünür
-    (`PointerSource::Touch`, fw 2c21982).
+  - Tutamaçta fare ve dokunma aynı yoldan: framework tutamaçtaki (sahiplenilmeyen) dokunmayı
+    işaretçi olarak öykünür (`PointerSource::Touch`, fw 2c21982); tuş temasları "Dokunma"da.
 - **`[osk] reserve_space`** (varsayılan `false`): açıkken yanaşık klavye kendi yüksekliğinde
   exclusive zone ister (v1 davranışı; pencereler itilir). Varsayılan kapalı çünkü kullanıcı itmeyi
   istemedi ve çoğu yazı alanı ekranın ortasında; açık bırakılması, odaktaki alanın örtülmesini
@@ -181,6 +181,55 @@ yok). Kabuk düşerse compositor sanal klavyeyi yok eder ve basılı tuşları b
 
 Göster/gizle bir ayar değil, çalışma anı durumudur (`msg osk show|hide`, `status.visible`).
 
+## Dokunma (2026-10-16, framework `wl_touch`, `docs/design/touch.md`)
+
+Klavye yüzeyindeki **tuş** temasları `App::touch` ile **sahiplenilir**: işaretçi öykünmesi yok,
+her parmak kendi tuşunu izler.
+
+- Kısa dokunuş tuşu **kalkışta** yazar (bas + bırak). Parmak kalkmadan başka tuşa kayarsa hedef
+  değişir: yanlış tuşa basan parmak kaydırılarak düzeltilir, aradaki tuşlar yazılmaz.
+- Tuşta `TOUCH_HOLD` (400 ms) kalan parmak tuşa basar ve basılı tutar: tekrar istemcide sürer
+  (Backspace silmeye devam eder). Kayınca ya da kalkınca bırakılır.
+- Çoklu dokunma: iki başparmakla hızlı yazışta ikinci parmağın kalkışı da yazar (kalkış sırasıyla).
+  `Osk` tek tuş tutar; basılı tutulan tuşun sahibi temas izlenir, başka temasın bırakması onu
+  kesmez, başka bir tuşun yazılması basılı tutulanı bırakır.
+- **Tutamaç** sahiplenilmez (sürükleme ya da yerleşme sürerken başlayan temas da): framework
+  onu işaretçi olarak öykünür, sürükleme fareyle aynı yoldan gider.
+- Fare davranışı değişmedi (basışta yazar, kayınca bırakır). Fark gerekçesi: farede düzeltme
+  ihtiyacı yok ve basışta yazmak gecikmesiz; parmakta isabet daha kaba, kalkışta yazmak telefon
+  klavyelerinin alışılmış davranışı.
+- Compositor iptalinde (`Cancel`) hiçbir şey yazılmaz, basılı tuş bırakılır.
+- **Kenardan kaydırarak açma yok (karar 2026-10-17).** Ekran kenarından kaydırmayı yakalamak için
+  kenarda her zaman açık, girdi alan bir şerit yüzey gerekir: pencerelerin kenar temaslarını
+  (kaydırma çubukları, kenara yaslı düğmeler) çalar ve compositor'un kendi hareketleriyle
+  (Hyprland eklentileri) çakışır. Açma yolları: hızlı ayar kartı, kısayol (`osk_toggle`) ve
+  `msg osk show`; dokunmatik oturum için ileride bar'da bir düğme.
+- **Canlı doğrulama (2026-10-17):** `tools/live/osk-touch/scenario.sh`, yalıtılmış a11y ortamında
+  framework sentetik dokunmasıyla (`test-touch`; `wl_touch` işleyicisiyle aynı yol, framework
+  `docs/design/touch.md` "Sentetik dokunma"); tuş kutuları AT-SPI'dan. Kendi kitty pencerede
+  yakalanan: kısa dokunuş "a", s→d kaydırma yalnız "d", iki başparmak "f" + "g" (kalkış sırası),
+  iptal edilen "h" yazılmadı, 1,6 sn basılı Geri sil 17 kez sildi (istemci tekrarı); tutamaçtan
+  dokunmayla yukarı sürükleme yüzen kipe geçirdi.
+
+## Ekran okuyucu ve gerçek girdi (2026-10-17)
+
+Ekran klavyesi **gerçek girdi üretir**: tuşu sanal klavyeyle (`zwp_virtual_keyboard_v1`) odaktaki
+yüzeye gönderir; compositor için fiziksel klavyeden farkı yoktur. Bu yüzden AT kuralı (ADR-0011
+madde 7: yalnız gerçek girdi onaylar) ekran klavyesinde şu demektir:
+
+- Klavyeye **dokunma ve işaretçi** gerçek kullanıcı girdisidir; tuş yazar.
+- Bir AT eylemiyle tuşa basmak, a11y bus'ındaki herhangi bir sürecin (Flatpak dahil) odaktaki
+  pencereye — terminal, parola alanı, oturum kilitliyse **kilit ekranının parola alanı** —
+  yazması olurdu (sanal klavye girdisi odaktaki yüzeye gider). Bu yüzden tuşlar AT'ye **her
+  zaman eylemsizdir**, yalnız kilitliyken değil: ağaçta `Click` yok (`KeyboardView::access`) ve
+  klavye yüzeyine gelen AT eylemi hiçbir şeye dönüşmez (`app/a11y.rs` etkinleştirme yalnız
+  bar/panel yüzeylerinde). Ekran okuyucu tuşları okur (ad, basılı değiştirici), basamaz.
+- Kilitliyken ayrıca kabuğun bütün ağacı askıdadır (`LockedHint` → `set_a11y_suspended`) ve
+  kabuğun klavyesi kilit yüzeylerinin altında kalır. Kilit ekranında klavye gerekirse kilit
+  sürecinin içinde, AT'ye yine eylemsiz olarak yapılır (Sınırlar).
+- Bekçi: `tests/it/at_policy.rs` `osk_keys_never_take_assistive_actions`; birim
+  `access_tree_names_keys_without_actions`.
+
 ## Sınırlar (v1)
 
 - **Overlay odaktaki yazı alanını örtebilir** (v2, varsayılan): pencereler itilmediği için alt
@@ -197,8 +246,10 @@ Göster/gizle bir ayar değil, çalışma anı durumudur (`msg osk show|hide`, `
 - **Bar alttayken** alt kenardan büyüyen yapraklar (başlatıcı, alt çekmece) klavyenin altında
   kalabilir: klavye kabuğun iç alanını oymaz. v2: açık klavyeyi alt kenarda iç alanı oyan bir şerit
   olarak saymak (sabit panel gibi).
-- Dokunmatik ekran: framework runtime'ı `wl_touch` olaylarını işaretçi olayı olarak vermiyorsa
-  dokunma çalışmaz; v1 işaretçiyle doğrulandı (touch → framework talebi).
+- Dokunmatik ekran gerçek donanımda denenmedi: canlı test framework sentetik dokunmasıyla
+  (compositor tarafı sentetik; "Dokunma" → canlı doğrulama). Gerçek `wl_touch`'ta tutamaç
+  sürüklemesinin yüzey içi konum tabanı (`GrabFrame`, işaretçi için ölçüldü) compositor'a bağlı
+  ve ayrıca doğrulanmadı.
 - Tek düzen grubu: keymap'ler tek gruplu; "düzen değiştir" kabuğun kendi keymap'ini değiştirir,
   Hyprland'in `kb_layout` grubunu değiştirmez.
 - Esc, F tuşları, Super yok (v2: ikinci sayfa).

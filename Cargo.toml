@@ -34,6 +34,9 @@ path = "src/bin/nuxut-filechooser.rs"
 # Yalnızca canlı görsel test: framework DataControl gelene dek başlatıcının pano kipini
 # önceden doldurulmuş sahte kaynakla gösterir (`NUXUT_CLIPBOARD_DEMO=1`). Ürün derlemesinde kapalı.
 clipboard-demo = []
+# YALNIZ canlı test (debug): framework sentetik dokunması (`NUXUT_TEST_TOUCH` FIFO'su; başsız
+# sway'de dokunmatik koltuk yok). Sürüm derlemesinde framework derleme hatası verir.
+test-touch = ["nuxut/test-touch"]
 
 [dependencies]
 nuxut-core = { version = "0.2.0-alpha.1", path = "../framework/crates/nuxut-core" }

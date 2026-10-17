@@ -8,13 +8,13 @@
 //! yanaşıkken alt köşeler kenara gömülüdür. Tuş kapakları framework parçalarından kurulur:
 //! `Interaction` (state layer), `Label`, `IconView`, tema renk/şekil token'ları. Koda gömülü renk yok.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nuxut::access::{AccessTree, Role};
 use nuxut::i18n::t;
 use nuxut::render::{BlobField, BlobShape, RectStyle, ShadowStyle};
 use nuxut::ui::{Icon, IconName, IconView, Interaction, Label, TextRole, Ui, style, text_style};
-use nuxut::{Button as MouseButton, Color, Corners, Point, PointerEvent, PointerKind, Rect, Size, Theme};
+use nuxut::{Button as MouseButton, Color, Corners, Point, PointerEvent, PointerKind, Rect, Size, Theme, TouchEvent, TouchId, TouchPhase};
 
 use crate::services::osk::keys::{self, ROW_UNITS};
 use crate::services::osk::{KeyAction, KeySpec, Osk, Special};
@@ -23,6 +23,35 @@ use crate::services::osk::{KeyAction, KeySpec, Osk, Special};
 const ROWS: usize = 5;
 /// Bir tuş biriminin genişliği / yüksekliği.
 const UNIT_ASPECT: f32 = 1.25;
+
+/// Dokunmada tuş bu süre basılı kalırsa basılır ve basılı tutulur (istemci tekrarlar); daha kısa
+/// dokunuş kalkışta yazılır (parmağı kaydırıp düzeltmek mümkün).
+pub const TOUCH_HOLD: Duration = Duration::from_millis(400);
+
+/// Dokunmatik ekrandan çıkan olay (temas başına).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchInput {
+    /// Parmak tuştan kalktı: bas + bırak.
+    Commit(KeyAction),
+    /// Parmak tuşta [`TOUCH_HOLD`] kaldı: bas ve basılı tut.
+    Hold(KeyAction),
+    /// Bu temasın basılı tuttuğu tuş bırakıldı.
+    Release,
+}
+
+/// Bir dokunma temasının durumu.
+#[derive(Debug, Clone, Copy)]
+struct Contact {
+    id: TouchId,
+    key: Option<usize>,
+    /// Tuş için bekleme başladı (kaydırınca yeniden başlar).
+    since: Instant,
+    /// `Hold` gönderildi: tuş basılı.
+    held: bool,
+}
+
+/// Aynı anda izlenen en çok temas.
+const MAX_CONTACTS: usize = 10;
 
 /// İşaretçiden çıkan olay (konumlar yüzey koordinatı).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -136,6 +165,8 @@ pub struct KeyboardView {
     /// Tutamaçtan sürükleniyor.
     dragging: bool,
     handle: Interaction,
+    /// Dokunmatik ekran temasları (çoklu dokunma; işaretçiden bağımsız).
+    contacts: Vec<Contact>,
 }
 
 /// Dış boşluk, tuş arası ve tutamaç şeridinin yüksekliği.
@@ -159,6 +190,7 @@ impl KeyboardView {
             pressed: None,
             dragging: false,
             handle: Interaction::new(theme),
+            contacts: Vec::new(),
         }
     }
 
@@ -318,11 +350,86 @@ impl KeyboardView {
             _ => {}
         }
         let mut repaint = self.handle.set_state(on_handle || self.dragging, self.dragging, now);
-        for (i, c) in self.caps.iter_mut().enumerate() {
-            let hovered = hit == Some(i) && c.enabled;
-            repaint |= c.interaction.set_state(hovered, self.pressed == Some(i), now);
-        }
+        repaint |= self.refresh_states(hit, now);
         (repaint || input.is_some(), input)
+    }
+
+    /// Tutamaçta mı (dokunmada tutamaç sahiplenilmez: işaretçi öykünmesiyle sürüklenir).
+    pub fn on_handle(&self, theme: &Theme, p: Point) -> bool {
+        self.handle_rect(theme).contains(p)
+    }
+
+    /// Ham dokunma (temas başına; uygulama `App::touch` ile sahiplenir). Tuş kalkışta yazılır,
+    /// [`TOUCH_HOLD`] basılı kalırsa basılı tutulur ([`touch_hold`](Self::touch_hold)); parmak
+    /// başka tuşa kayarsa hedef değişir (basılı tutulan bırakılır). Dönüş: (yeniden çiz, olay,
+    /// bekleme zamanlayıcısı kurulmalı mı).
+    pub fn touch(&mut self, event: &TouchEvent, now: Instant) -> (bool, Option<TouchInput>, bool) {
+        let key = self.key_at(event.position).filter(|&i| self.caps[i].enabled);
+        let mut input = None;
+        let mut arm = false;
+        match event.phase {
+            TouchPhase::Down => {
+                self.contacts.retain(|c| c.id != event.id);
+                if self.contacts.len() < MAX_CONTACTS {
+                    self.contacts.push(Contact { id: event.id, key, since: now, held: false });
+                    arm = key.is_some();
+                }
+            }
+            TouchPhase::Motion => {
+                if let Some(c) = self.contacts.iter_mut().find(|c| c.id == event.id)
+                    && c.key != key
+                {
+                    if std::mem::take(&mut c.held) {
+                        input = Some(TouchInput::Release);
+                    }
+                    c.key = key;
+                    c.since = now;
+                    arm = key.is_some();
+                }
+            }
+            TouchPhase::Up | TouchPhase::Cancel => {
+                if let Some(i) = self.contacts.iter().position(|c| c.id == event.id) {
+                    let c = self.contacts.swap_remove(i);
+                    input = if c.held {
+                        Some(TouchInput::Release)
+                    } else if event.phase == TouchPhase::Up {
+                        c.key.map(|k| TouchInput::Commit(self.caps[k].spec.action))
+                    } else {
+                        None
+                    };
+                }
+            }
+        }
+        let repaint = self.refresh_states(None, now);
+        (repaint || input.is_some(), input, arm)
+    }
+
+    /// Bekleme zamanlayıcısı: tuşunda [`TOUCH_HOLD`] kalan ve henüz basılmamış temaslar basılır.
+    /// Erken (kaydırmayla eskimiş) zamanlayıcı bir şey yapmaz.
+    pub fn touch_hold(&mut self, now: Instant) -> Vec<(TouchId, TouchInput)> {
+        let mut out = Vec::new();
+        for c in &mut self.contacts {
+            if let Some(k) = c.key
+                && !c.held
+                && now.saturating_duration_since(c.since) >= TOUCH_HOLD
+            {
+                c.held = true;
+                out.push((c.id, TouchInput::Hold(self.caps[k].spec.action)));
+            }
+        }
+        out
+    }
+
+    /// Tuş kapaklarının hover/basılı durumu: işaretçinin üstündeki tuş (`hover`), işaretçiyle
+    /// ya da bir parmakla basılı tuşlar.
+    fn refresh_states(&mut self, hover: Option<usize>, now: Instant) -> bool {
+        let mut repaint = false;
+        for (i, c) in self.caps.iter_mut().enumerate() {
+            let touched = self.contacts.iter().any(|t| t.key == Some(i));
+            let hovered = (hover == Some(i) || touched) && c.enabled;
+            repaint |= c.interaction.set_state(hovered, self.pressed == Some(i) || touched, now);
+        }
+        repaint
     }
 
     /// Tutamacın üstünde mi (imleç: taşıma).
@@ -436,6 +543,69 @@ mod tests {
 
     fn center_of(v: &KeyboardView, action: KeyAction) -> Point {
         v.caps.iter().find(|c| c.spec.action == action).unwrap().rect.center()
+    }
+
+    fn tev(id: i32, phase: TouchPhase, p: Point) -> TouchEvent {
+        TouchEvent { id: TouchId(id), position: p, phase }
+    }
+
+    #[test]
+    fn touch_tap_commits_on_lift_and_slide_corrects() {
+        let (mut v, _) = view();
+        let now = Instant::now();
+        let a = center_of(&v, KeyAction::Char(code::AC01));
+        let s = center_of(&v, KeyAction::Char(code::AC01 + 1));
+        let (repaint, input, arm) = v.touch(&tev(0, TouchPhase::Down, a), now);
+        assert!(repaint && arm && input.is_none(), "basışta yazılmaz, bekleme kurulur");
+        let (_, input, arm) = v.touch(&tev(0, TouchPhase::Motion, s), now);
+        assert!(arm && input.is_none(), "kaydırma hedefi değiştirir, yazmaz");
+        let (_, input, _) = v.touch(&tev(0, TouchPhase::Up, s), now);
+        assert_eq!(input, Some(TouchInput::Commit(KeyAction::Char(code::AC01 + 1))));
+        // İptal yazmaz.
+        v.touch(&tev(1, TouchPhase::Down, a), now);
+        assert_eq!(v.touch(&tev(1, TouchPhase::Cancel, a), now).1, None);
+    }
+
+    #[test]
+    fn touch_hold_presses_and_release_follows_contact() {
+        let (mut v, _) = view();
+        let now = Instant::now();
+        let a = center_of(&v, KeyAction::Char(code::AC01));
+        let s = center_of(&v, KeyAction::Char(code::AC01 + 1));
+        v.touch(&tev(0, TouchPhase::Down, a), now);
+        assert!(v.touch_hold(now + TOUCH_HOLD / 2).is_empty(), "erken zamanlayıcı etkisiz");
+        assert_eq!(v.touch_hold(now + TOUCH_HOLD), [(TouchId(0), TouchInput::Hold(KeyAction::Char(code::AC01)))]);
+        assert!(v.touch_hold(now + TOUCH_HOLD * 2).is_empty(), "bir kez basılır");
+        // Kayınca bırakır, yeni tuşta bekleme yeniden başlar.
+        let later = now + TOUCH_HOLD * 2;
+        assert_eq!(v.touch(&tev(0, TouchPhase::Motion, s), later).1, Some(TouchInput::Release));
+        assert!(v.touch_hold(later + TOUCH_HOLD / 2).is_empty());
+        assert_eq!(v.touch_hold(later + TOUCH_HOLD), [(TouchId(0), TouchInput::Hold(KeyAction::Char(code::AC01 + 1)))]);
+        assert_eq!(
+            v.touch(&tev(0, TouchPhase::Up, s), later).1,
+            Some(TouchInput::Release),
+            "basılı tutulan kalkışta bırakılır, yeniden yazılmaz"
+        );
+    }
+
+    #[test]
+    fn two_thumbs_both_type_in_lift_order() {
+        let (mut v, _) = view();
+        let now = Instant::now();
+        let a = center_of(&v, KeyAction::Char(code::AC01));
+        let s = center_of(&v, KeyAction::Char(code::AC01 + 1));
+        v.touch(&tev(0, TouchPhase::Down, a), now);
+        v.touch(&tev(1, TouchPhase::Down, s), now);
+        assert_eq!(v.touch(&tev(0, TouchPhase::Up, a), now).1, Some(TouchInput::Commit(KeyAction::Char(code::AC01))));
+        assert_eq!(v.touch(&tev(1, TouchPhase::Up, s), now).1, Some(TouchInput::Commit(KeyAction::Char(code::AC01 + 1))));
+    }
+
+    #[test]
+    fn handle_is_left_to_pointer_emulation() {
+        let (v, theme) = view();
+        let h = v.handle_rect(&theme).center();
+        assert!(v.on_handle(&theme, h));
+        assert!(!v.on_handle(&theme, center_of(&v, KeyAction::Char(code::AC01))));
     }
 
     #[test]

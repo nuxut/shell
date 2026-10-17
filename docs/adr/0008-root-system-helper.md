@@ -61,3 +61,9 @@ polkit eylemi** `org.nuxut.system-helper.<alan>` — `exec.path` + `exec.argv1` 
   kurulmuş `/usr/lib/nuxut/nuxut-system-helper`'ı çalıştırır).
 - Ürün kullanıcıya elle `sudo`/`chown`/`pkexec` komutu yazdırmaz (kullanıcı kararı 2026-10-17);
   bekçi testi `tests/root_command_guard.rs`.
+- Üçüncü alan `packages` (2026-10-17): `nuxut-system-helper packages install <ad>…` yalnız
+  yardımcının sabit listesindeki resmî depo paketlerini (`packages::ALLOWED`; Nuxut'un görünüm
+  kataloğu, kabuk testi eşliği denetler) `/usr/bin/pacman -S --needed --noconfirm --` ile kurar;
+  polkit eylemi `org.nuxut.system-helper.packages` (`auth_admin`). Kullanıcı tarafı
+  `nuxut-shell packages install`, Ayarlar'ın "Kur" düğmesi. AUR paketi kurulmaz (kök olarak
+  derlenmez); yedek/geri alma pacman'ın işi.

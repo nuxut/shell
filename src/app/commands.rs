@@ -163,11 +163,13 @@ impl Shell {
                 crate::services::image_sandbox::active(&self.image_sandbox),
                 &self.wallpaper_decoder.stats(),
             )),
+            Command::Look(ipc::LookCommand::RestartApp(app)) => restart_app(app),
             Command::Look(c) => {
                 let state = crate::services::look::LookState::read(cx.theme())?;
                 Ok(match c {
                     ipc::LookCommand::Status => state.status_json(self.look.writer(), self.look.report.clone(), self.look.themes_rev()),
                     ipc::LookCommand::Plan => state.plan_json(self.look.writer()),
+                    ipc::LookCommand::RestartApp(app) => return restart_app(app),
                 })
             }
             c @ (Command::Volume { .. } | Command::VolumeMute { .. } | Command::MicMute { .. } | Command::Brightness { .. }) => {
@@ -458,6 +460,20 @@ fn fix_target(key: &str, candidate: &str) -> String {
         Some((parent, _)) => format!("{parent}.{candidate}"),
         None => candidate.to_owned(),
     }
+}
+
+/// `msg look restart-app <kimlik>` (bildirimdeki "Şimdi yeniden başlat"): bloklayan D-Bus işi arka
+/// planda, sonuç günlüğe (`services::look::app_refresh`).
+fn restart_app(app: crate::services::look::app_refresh::App) -> Result<String, String> {
+    std::thread::Builder::new()
+        .name("nuxut-app-restart".into())
+        .spawn(move || {
+            if let Err(e) = crate::services::look::app_refresh::restart(app) {
+                tracing::warn!(app = app.id(), "uygulama yeniden başlatılamadı: {e}");
+            }
+        })
+        .map(|_| "ok".to_owned())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

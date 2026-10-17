@@ -33,7 +33,11 @@ mod sandbox_support;
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 
-const WAIT: Duration = Duration::from_secs(5);
+#[path = "support/liveness.rs"]
+mod liveness;
+
+const WAIT: Duration = liveness::LIVENESS;
+const PROMPT: Duration = liveness::PROMPT;
 
 // ---------------------------------------------------------------------------------------
 // Özel bus
@@ -72,10 +76,12 @@ impl PrivateBus {
     fn options(&self) -> TrayOptions {
         TrayOptions {
             bus_address: Some(self.address.clone()),
-            call_timeout: Duration::from_millis(400),
+            // Ürün varsayılanı (2 sn, 4 deneme): 400 ms × 2 deneme yük altında bir donmada öğeyi ya da
+            // menüyü düşürüyordu (2026-10-17).
+            call_timeout: Duration::from_secs(2),
             coalesce_quiet: Duration::from_millis(30),
             coalesce_max_delay: Duration::from_millis(150),
-            initial_read_attempts: 2,
+            initial_read_attempts: 4,
             retry_delay: Duration::from_millis(50),
             icon_px: 32,
             min_refresh_interval: Duration::from_millis(100),
@@ -133,6 +139,20 @@ impl Tray {
                 return event;
             }
         }
+    }
+
+    /// Koşul (model ve o ana dek gelen olaylar üzerinden) sağlanana dek gelen bütün olaylar;
+    /// canlılık sınırına dek bekler. Sabit süreli toplama yük altında eksik kalıyordu (2026-10-17).
+    fn collect_until(&mut self, what: &str, mut pred: impl FnMut(&Self, &[TrayEvent]) -> bool) -> Vec<TrayEvent> {
+        let deadline = Instant::now() + WAIT;
+        let mut out = Vec::new();
+        while !pred(self, &out) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let event = self.events.recv_timeout(left).unwrap_or_else(|_| panic!("beklenen durum gelmedi: {what}; gelenler: {out:?}"));
+            self.model.apply(&event);
+            out.push(event);
+        }
+        out
     }
 
     /// `dur` boyunca gelen olaylar.
@@ -261,6 +281,8 @@ struct FakeMenu {
     hang: bool,
     /// Her `GetLayout` yanıtından önce bekleme (yarış testleri).
     delay: Duration,
+    /// Yalnız ilk `GetLayout` yanıtından önce bekleme (ilk okuma zaman aşımı testi); sonra hızlı.
+    first_delay: Mutex<Duration>,
     log: Log,
 }
 
@@ -299,6 +321,10 @@ impl FakeMenu {
 impl FakeMenu {
     async fn get_layout(&self, parent: i32, depth: i32, _props: Vec<String>) -> Layout {
         self.log.push(format!("GetLayout {parent} {depth}"));
+        let first = std::mem::take(&mut *self.first_delay.lock().unwrap());
+        if !first.is_zero() {
+            async_io::Timer::after(first).await;
+        }
         if !self.delay.is_zero() {
             async_io::Timer::after(self.delay).await;
         }
@@ -351,11 +377,12 @@ struct AppSpec {
     activate_fails: bool,
     menu_hangs: bool,
     menu_delay: Duration,
+    menu_first_delay: Duration,
 }
 
 impl AppSpec {
     fn new(title: &'static str) -> Self {
-        Self { title, path: "/StatusNotifierItem", with_menu: true, activate_fails: false, menu_hangs: false, menu_delay: Duration::ZERO }
+        Self { title, path: "/StatusNotifierItem", with_menu: true, activate_fails: false, menu_hangs: false, menu_delay: Duration::ZERO, menu_first_delay: Duration::ZERO }
     }
 }
 
@@ -376,7 +403,7 @@ impl FakeApp {
         };
         conn.object_server().at(spec.path, item).unwrap();
         if spec.with_menu {
-            let menu = FakeMenu { revision: 1, open_label: "_Aç".into(), hang: spec.menu_hangs, delay: spec.menu_delay, log: log.clone() };
+            let menu = FakeMenu { revision: 1, open_label: "_Aç".into(), hang: spec.menu_hangs, delay: spec.menu_delay, first_delay: Mutex::new(spec.menu_first_delay), log: log.clone() };
             conn.object_server().at(menu_path, menu).unwrap();
         }
         Self { conn, log, path: spec.path }
@@ -540,7 +567,7 @@ fn watcher_role_item_icon_menu_and_removal() {
     // Temiz kapanış: ad bırakılır.
     let started = Instant::now();
     drop(tray);
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < PROMPT, "{:?}", started.elapsed());
     assert!(!bus.has_owner(&client, WATCHER_NAME), "watcher adı bırakılmalı");
 }
 
@@ -613,6 +640,26 @@ fn activate_failure_requests_menu() {
     assert_eq!(app.log.count("GetLayout"), reads);
 }
 
+/// İlk menü okuması zaman aşımına uğrasa da açılış cevapsız kalmaz (2026-10-17): önceki ağaç
+/// yokken tek zaman aşımı (yük altında donma, meşgul uygulama) tıklanan menüyü hiç açmıyordu.
+/// Okuma öğe okumasıyla aynı bütçeyle yeniden denenir; `AboutToShow` tekrarlanmaz.
+#[test]
+fn first_menu_read_timeout_is_retried() {
+    let bus = bus_or_skip!();
+    let options = bus.options();
+    let mut tray = Tray::start_with(options.clone());
+    tray.wait_for("Role", |e| matches!(e, TrayEvent::Role(_)));
+    let slow_first = options.call_timeout + Duration::from_secs(1);
+    let app = FakeApp::start(&bus, AppSpec { menu_first_delay: slow_first, ..AppSpec::new("İlkiYavaş") });
+    app.register(&app.unique());
+    let id = tray.added("İlkiYavaş");
+    let request = next_menu_request();
+    assert!(tray.service.handle().open_menu(&id, request));
+    tray.wait_for("yeniden denenen menü", |e| matches!(e, TrayEvent::MenuLayout { request: r, .. } if *r == request));
+    assert!(app.log.count("GetLayout") >= 2, "ilk okuma zaman aşımına uğradı, ikinci okuma cevapladı");
+    assert_eq!(app.log.count("AboutToShow 0"), 1, "yeniden denemede AboutToShow(0) tekrarlanmaz");
+}
+
 /// Kullanıcı yorumu 4 regresyonu ("sağ tık bazen menü açmıyor, hızlı tıklamada karışıyor"):
 /// - okuma sürerken kapat + yeniden aç: eski açılışın geç yanıtı yayınlanmaz, yeni açılış
 ///   kendi yanıtını alır;
@@ -635,7 +682,11 @@ fn menu_requests_are_answered_per_open() {
     assert!(handle.close_menu(&id));
     let second = next_menu_request();
     assert!(handle.open_menu(&id, second));
-    let events = tray.collect(Duration::from_millis(1500));
+    let mut events = tray.collect_until("ikinci açılışın menüsü", |_, ev| {
+        ev.iter().any(|e| matches!(e, TrayEvent::MenuLayout { request, .. } if *request == second))
+    });
+    // Geç kalan (birinci açılışın) yanıtı için kısa pencere.
+    events.extend(tray.collect(Duration::from_millis(300)));
     let layouts: Vec<_> =
         events.iter().filter_map(|e| if let TrayEvent::MenuLayout { request, .. } = e { Some(*request) } else { None }).collect();
     assert!(!layouts.is_empty() && layouts.iter().all(|r| *r == second), "yalnızca geçerli açılışın yanıtı: {layouts:?}");
@@ -672,9 +723,10 @@ fn menu_requests_are_answered_per_open() {
 #[test]
 fn unresponsive_apps_cannot_block_the_service() {
     let bus = bus_or_skip!();
-    // Uzun zaman aşımı: servis takılan çağrıları bekleseydi gecikme ≥ 1.5 s olurdu; yüklü
-    // makinede bile normal yol bunun çok altında kalır.
-    let timeout = Duration::from_millis(1500);
+    // Çağrı zaman aşımı `PROMPT`'un üç katı: servis takılan bir çağrıyı bekleseydi gecikme en az
+    // bu kadar olurdu; iddialar `PROMPT` ile ölçülür (yük altında donma payı, 2026-10-17; eskiden
+    // 1.5 sn zaman aşımı + 500 ms iddia bir donmada düşüyordu).
+    let timeout = PROMPT * 3;
     let mut tray = Tray::start_with(TrayOptions { call_timeout: timeout, ..bus.options() });
     tray.wait_for("Role", |e| matches!(e, TrayEvent::Role(_)));
 
@@ -692,36 +744,50 @@ fn unresponsive_apps_cannot_block_the_service() {
     let slow_id = tray.added("Yavaş");
     tray.service.handle().open_menu(&slow_id, next_menu_request());
 
-    // Takılı çağrılar sürerken servis döngüsü ve watcher arayüzü hemen cevap verir
-    // (servis çağrıları bekleseydi gecikme zaman aşımı kadar olurdu). Ölçüm yalnızca
-    // servisin kendisini kapsar; test sürecindeki sahte uygulamaların zamanlamasını değil.
+    // Takılı çağrılar sürerken servis döngüsü ve watcher arayüzü cevap verir (servis çağrıları
+    // bekleseydi gecikme zaman aşımı kadar olurdu). Ölçüm yalnızca servisin kendisini kapsar;
+    // test sürecindeki sahte uygulamaların zamanlamasını değil.
     for _ in 0..5 {
         let started = Instant::now();
         let _ = registered_items(&registrar);
-        assert!(started.elapsed() < timeout / 3, "watcher takıldı: {:?}", started.elapsed());
+        assert!(started.elapsed() < PROMPT, "watcher takıldı: {:?}", started.elapsed());
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Normal uygulama eklenir ve çalışır (yük altında ilk okuması zaman aşımına uğrasa bile
-    // tekrar denenir).
+    // Normal uygulama eklenir ve çalışır.
     let ok = FakeApp::start(&bus, AppSpec::new("Normal"));
     ok.register(&ok.unique());
     let id = tray.added("Normal");
     tray.service.handle().activate(&id, 1, 1);
     ok.log.wait_for("Activate 1 1");
 
-    // Cevapsız öğe zaman aşımı + denemeler sonunda listeden düşer, hiç eklenmez.
-    let deadline = Instant::now() + WAIT * 2;
+    // Takılı çağrılar varken kapanış bekletmez.
+    let started = Instant::now();
+    drop(tray);
+    assert!(started.elapsed() < PROMPT, "{:?}", started.elapsed());
+    drop(dead);
+}
+
+/// Cevapsız öğe zaman aşımı + denemeler sonunda listeden düşer, hiç eklenmez (kısa zaman aşımıyla;
+/// takılmazlık iddiaları yukarıdaki testte).
+#[test]
+fn unresponsive_item_is_dropped() {
+    let bus = bus_or_skip!();
+    let mut tray = Tray::start(&bus);
+    tray.wait_for("Role", |e| matches!(e, TrayEvent::Role(_)));
+    let dead = zbus::block_on(zbus::connection::Builder::address(bus.address.as_str()).unwrap().internal_executor(false).build()).unwrap();
+    let dead_name = dead.unique_name().unwrap().to_string();
+    let registrar = bus.connect();
+    registrar
+        .call_method(Some(WATCHER_NAME), WATCHER_PATH, Some("org.kde.StatusNotifierWatcher"), "RegisterStatusNotifierItem", &(dead_name.as_str(),))
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
     while registered_items(&registrar).iter().any(|s| s.starts_with(&dead_name)) {
         assert!(Instant::now() < deadline, "cevapsız öğe düşürülmedi");
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(tray.model.items().iter().all(|i| i.bus_name != dead_name));
-
-    // Takılı çağrılar varken kapanış bekletmez.
-    let started = Instant::now();
     drop(tray);
-    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
     drop(dead);
 }
 
@@ -750,7 +816,9 @@ fn item_count_is_limited() {
         conn.call_method(Some(WATCHER_NAME), WATCHER_PATH, Some("org.kde.StatusNotifierWatcher"), "RegisterStatusNotifierItem", &(path.as_str(),))
             .unwrap();
     }
-    let events = tray.collect(Duration::from_millis(1500));
+    let mut events = tray.collect_until("sınır kadar öğe", |t, _| t.model.items().len() >= MAX_ITEMS);
+    // Sınırın üstünde öğe eklenmediğini görmek için kısa pencere.
+    events.extend(tray.collect(Duration::from_millis(300)));
     let added = events.iter().filter(|e| matches!(e, TrayEvent::ItemAdded(_))).count();
     assert_eq!(added, MAX_ITEMS);
     assert_eq!(tray.model.items().len(), MAX_ITEMS);
@@ -864,7 +932,8 @@ fn signal_storm_is_rate_limited() {
     let before = app.log.count("read");
     let started = Instant::now();
     let mut sent = 0;
-    while started.elapsed() < Duration::from_secs(1) {
+    // En az 1 sn ve en az 200 sinyal: süre yük altında donmayla geçse de fırtına üretilir.
+    while started.elapsed() < Duration::from_secs(1) || sent < 200 {
         app.signal(app.path, "org.kde.StatusNotifierItem", "NewIcon");
         sent += 1;
     }
@@ -878,7 +947,7 @@ fn signal_storm_is_rate_limited() {
     let client = bus.connect();
     let t = Instant::now();
     let _ = registered_items(&client);
-    assert!(t.elapsed() < Duration::from_millis(500));
+    assert!(t.elapsed() < PROMPT, "servis takıldı: {:?}", t.elapsed());
 }
 
 #[test]
@@ -896,7 +965,7 @@ fn thousand_registrations_are_bounded() {
     let client = bus.connect();
     let t = Instant::now();
     let items = registered_items(&client);
-    assert!(t.elapsed() < Duration::from_millis(500), "servis takıldı");
+    assert!(t.elapsed() < PROMPT, "servis takıldı: {:?}", t.elapsed());
     assert!(items.len() <= MAX_ITEMS, "{} kayıt", items.len());
     // Hiçbiri gerçek nesne değil: hiç öğe eklenmez, okuma denemeleri bitince liste boşalır.
     let deadline = Instant::now() + WAIT * 2;

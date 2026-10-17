@@ -190,7 +190,7 @@ fn session_actions_go_to_logind() {
 
     let t = std::time::Instant::now();
     drop(service);
-    assert!(t.elapsed() < Duration::from_secs(1), "temiz ve hızlı kapanış");
+    assert!(t.elapsed() < crate::support::PROMPT, "temiz ve hızlı kapanış: {:?}", t.elapsed());
 }
 
 #[test]

@@ -381,8 +381,18 @@ impl Dir {
             Mode::from_raw_mode(0o600),
         )
         .map_err(|e| io_err(&self.path(name), e))?;
-        rustix::fs::flock(&fd, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-            .map_err(|_| io_err(&self.path(name), io::Error::new(io::ErrorKind::WouldBlock, "başka bir Nuxut sistem işlemi sürüyor")))?;
+        // Kısa süre yeniden denenir: kilidi tutan tanıtıcının bir kopyası, `fork` edilip henüz
+        // `exec` etmemiş bir çocukta (CLOEXEC `exec`'te kapanır) birkaç ms daha yaşayabilir; aynı
+        // süreçteki art arda iki işlem o pencerede "başka işlem sürüyor" sanılıyordu (testlerde
+        // kararsızlık, 2026-10-17). Gerçekten süren başka işlem en çok ~1 sn sonra reddedilir.
+        let mut tries = 0;
+        while rustix::fs::flock(&fd, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_err() {
+            if tries >= 50 {
+                return Err(io_err(&self.path(name), io::Error::new(io::ErrorKind::WouldBlock, "başka bir Nuxut sistem işlemi sürüyor")));
+            }
+            tries += 1;
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         Ok(fd)
     }
 }

@@ -641,7 +641,8 @@ fn spawn(dev: &Path, proc: &Path, recheck: Duration) -> (CameraService, mpsc::Re
     (svc, rx)
 }
 
-const WAIT: Duration = Duration::from_secs(5);
+/// Olay beklemesinin üst sınırı (koşul gelince hemen döner; gerekçe `tests/support/liveness.rs`).
+const WAIT: Duration = crate::test_liveness::LIVENESS;
 
 /// Uçtan uca: düğüm açılınca/kapanınca inotify uyanır, tarama sonucu değişince olay gelir.
 #[test]
@@ -669,7 +670,7 @@ fn service_reacts_to_open_and_close() {
     drop(f);
     let started = Instant::now();
     drop(svc);
-    assert!(started.elapsed() < Duration::from_secs(1), "hızlı durur");
+    assert!(started.elapsed() < crate::test_liveness::PROMPT, "hızlı durur: {:?}", started.elapsed());
 }
 
 /// Düşmanca: sahibi taramada görünmeyen bir açma göstergeyi söndürmez (fail-closed:

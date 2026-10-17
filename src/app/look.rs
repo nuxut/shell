@@ -20,11 +20,13 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use nuxut::Context;
+use nuxut::i18n::t;
 
 use super::{Shell, ShellMessage};
 use crate::services::look::backend::ApplyReport;
 use crate::services::look::writer::{self, SystemLive, WRITER_NAME};
 use crate::services::look::{self, LookState, SyncResult};
+use crate::services::notifications::{InternalAction, InternalNotice};
 
 /// Art arda değişimlerin birleştirildiği süre (palet + `framework.toml` yazımı aynı seçimden).
 /// Kısa: tur sürerken gelen yeni istek turu zaten yarıda keser ("son seçim kazanır").
@@ -249,6 +251,10 @@ impl Shell {
     }
 
     pub(super) fn on_look(&mut self, cx: &mut Context<Self>, result: SyncResult) {
+        let colors = result.report.as_ref().is_some_and(|r| !r.cancelled && r.written.contains(&look::plan::setting::MODE));
+        if colors {
+            self.refresh_static_apps(cx);
+        }
         if result.report.is_some() {
             self.look.report = result.report;
         }
@@ -258,6 +264,43 @@ impl Shell {
         if first || env_changed {
             self.request_hypr_sync(cx);
         }
+    }
+}
+
+impl Shell {
+    /// GTK4 renkleri yazıldı: canlı yenilenmeyen uygulamalar (`look::app_refresh`) — yalnız arka
+    /// plan süreci sessizce kapatılır, açık penceresi olan için "Şimdi yeniden başlat" bildirimi.
+    /// Test/ikincil örnekte (canlı eylem kapısı kapalı) hiçbir şey yapılmaz.
+    fn refresh_static_apps(&mut self, cx: &mut Context<Self>) {
+        if self.apply_env.guard(nuxut_apply::TargetKind::Dconf).is_err() {
+            return;
+        }
+        let client = self.client.clone();
+        let sender = cx.sender();
+        let spawned = std::thread::Builder::new().name("nuxut-app-refresh".into()).spawn(move || {
+            let clients = client.and_then(|c| c.request("j/clients").ok());
+            for app in look::app_refresh::after_colors_changed(clients.as_deref()) {
+                let name = app_name(app);
+                let notice = InternalNotice::popup(
+                    t!("shell-look-app-restart-title", app = name.as_str()),
+                    t!("shell-look-app-restart-body", app = name.as_str()),
+                    vec![InternalAction::new(t!("shell-look-app-restart-now"), format!("look restart-app {}", app.id()))],
+                );
+                if sender.send(ShellMessage::Notice(notice)).is_err() {
+                    break;
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("uygulama yenileme thread'i açılamadı: {e}");
+        }
+    }
+}
+
+/// Bildirimde görünen uygulama adı.
+fn app_name(app: look::app_refresh::App) -> String {
+    match app {
+        look::app_refresh::App::Nautilus => t!("shell-look-app-nautilus"),
     }
 }
 

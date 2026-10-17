@@ -107,24 +107,55 @@ impl PrivatePipeWire {
         self.dir.path().join("pipewire-0")
     }
 
-    /// Özel daemon'a karşı bir PipeWire aracı çalıştırır.
+    /// Özel daemon'a karşı bir PipeWire aracı çalıştırır; başarısızsa panikler. Süre sınırı
+    /// canlılık sınırıdır (`WAIT`): eskiden `timeout 5` idi ve yük altında (derleme slice'ının
+    /// donması, CPU kotası) araç bitmeden öldürülüp testi düşürüyordu (2026-10-17).
     fn tool(&self, program: &str, args: &[&str]) -> String {
-        let out = Command::new("timeout")
-            .arg("5")
-            .arg(program)
+        self.try_tool(program, args).unwrap_or_else(|e| panic!("{program} {args:?} başarısız: {e}"))
+    }
+
+    /// [`tool`](Self::tool)'un panik etmeyen hâli: sorgu döngüleri (`eventually`) geçici bir
+    /// başarısızlıkta yeniden dener.
+    fn try_tool(&self, program: &str, args: &[&str]) -> Result<String, String> {
+        let mut child = Command::new(program)
             .args(args)
             .env("PIPEWIRE_REMOTE", self.socket())
             .env("XDG_RUNTIME_DIR", self.dir.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{program} {args:?} başarısız");
-        String::from_utf8_lossy(&out.stdout).into_owned()
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        // Çıktı ayrı thread'de okunur: dolu boru aracı bekletmesin.
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
+            out
+        });
+        let deadline = Instant::now() + WAIT;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{WAIT:?} içinde bitmedi"));
+                }
+            }
+        };
+        let out = reader.join().unwrap_or_default();
+        if !status.success() {
+            return Err(format!("çıkış {status}"));
+        }
+        Ok(String::from_utf8_lossy(&out).into_owned())
     }
 
-    /// Düğümün `Props` parametresi (`pw-dump`).
+    /// Düğümün `Props` parametresi (`pw-dump`); okunamazsa `Null`.
     fn props(&self, id: u32) -> serde_json::Value {
-        let dump: serde_json::Value = serde_json::from_str(&self.tool("pw-dump", &[&id.to_string()])).unwrap();
+        let Ok(text) = self.try_tool("pw-dump", &[&id.to_string()]) else { return serde_json::Value::Null };
+        let dump: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
         dump[0]["info"]["params"]["Props"][0].clone()
     }
 
@@ -132,8 +163,9 @@ impl PrivatePipeWire {
         self.props(id)["channelVolumes"].as_array().map(|a| a.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_default()
     }
 
+    /// `default` metadata'sı; okunamazsa boş (sorgu döngüleri yeniden dener).
     fn metadata(&self) -> String {
-        self.tool("pw-metadata", &["-n", "default"])
+        self.try_tool("pw-metadata", &["-n", "default"]).unwrap_or_default()
     }
 }
 
@@ -337,8 +369,8 @@ fn starts_without_pipewire() {
     assert!(quiet.iter().all(|e| matches!(e, AudioEvent::State(s) if !s.available)), "{quiet:?}");
     let t = Instant::now();
     drop(svc);
-    // Güvenlik ağı: kapanış takılmamalı (yük altında planlama gecikmesi payı).
-    assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
+    // Güvenlik ağı: kapanış takılmamalı (canlılık sınırı; hızlı kapanış ürün yolunda ölçülmez).
+    assert!(t.elapsed() < WAIT, "{:?}", t.elapsed());
 }
 
 // ---------------------------------------------------------------------------------------
@@ -426,13 +458,23 @@ fn wpctl(pw: &PrivatePipeWire, args: &[&str]) -> String {
     pw.tool("wpctl", args)
 }
 
-/// `wpctl get-volume` → (seviye, sessiz).
-fn wpctl_volume(pw: &PrivatePipeWire, target: &str) -> (f64, bool) {
-    let out = wpctl(pw, &["get-volume", target]);
+/// `wpctl get-volume` → (seviye, sessiz); araç başarısızsa `None` (sorgu döngüsü yeniden dener).
+fn wpctl_volume(pw: &PrivatePipeWire, target: &str) -> Option<(f64, bool)> {
+    let out = pw.try_tool("wpctl", &["get-volume", target]).ok()?;
     let rest = out.trim().strip_prefix("Volume:").unwrap_or_else(|| panic!("beklenmeyen wpctl çıktısı: {out}"));
     let mut parts = rest.split_whitespace();
     let v: f64 = parts.next().unwrap().parse().unwrap();
-    (v, parts.any(|p| p == "[MUTED]"))
+    Some((v, parts.any(|p| p == "[MUTED]")))
+}
+
+/// Düğümün kanal seviyeleri; `pw-dump` geçici olarak okunamazsa yeniden dener.
+fn read_volumes(pw: &PrivatePipeWire, id: u32) -> Vec<f64> {
+    let mut v = Vec::new();
+    eventually("pw-dump okunur", || {
+        v = pw.volumes(id);
+        !v.is_empty()
+    });
+    v
 }
 
 fn diagnose(svc: &AudioService) -> String {
@@ -470,14 +512,14 @@ fn native_matches_wireplumber_mixer_on_props_path() {
     //    wpctl yerli yazımı aynı yüzdeyle okur. %100 = doğrusal 1.0 (0 dB); %125 yükseltme.
     for level in [0.3f32, 0.75, 1.0, 0.0, 1.25] {
         svc.set_volume(AudioTarget::DefaultSink, level);
-        eventually("wpctl yerli yazımı okur", || near(wpctl_volume(&pw, target).0, f64::from(level)));
-        let native = pw.volumes(id);
+        eventually("wpctl yerli yazımı okur", || wpctl_volume(&pw, target).is_some_and(|(v, _)| near(v, f64::from(level))));
+        let native = read_volumes(&pw, id);
         wpctl(&pw, &["set-volume", target, "0.42"]);
         state(&events, "wpctl 0.42", |s| s.default_sink().is_some_and(|d| near(f64::from(d.volume), 0.42)));
         wpctl(&pw, &["set-volume", target, &format!("{level}")]);
         let lvl = f64::from(level);
         let s = state(&events, "wpctl yazımı okundu", |s| s.default_sink().is_some_and(|d| near(f64::from(d.volume), lvl)));
-        let theirs = pw.volumes(id);
+        let theirs = read_volumes(&pw, id);
         assert_eq!(native.len(), theirs.len());
         assert!(native.iter().zip(&theirs).all(|(a, b)| (a - b).abs() < 1e-5), "seviye {level}: yerli {native:?} ≠ wpctl {theirs:?}");
         assert!(native.iter().all(|v| (v - lvl.powi(3)).abs() < 1e-4), "kübik: {native:?}");
@@ -486,7 +528,7 @@ fn native_matches_wireplumber_mixer_on_props_path() {
 
     // 2) Sessiz: iki yönde.
     svc.set_muted(AudioTarget::DefaultSink, true);
-    eventually("wpctl sessiz görür", || wpctl_volume(&pw, target).1);
+    eventually("wpctl sessiz görür", || wpctl_volume(&pw, target).is_some_and(|(_, muted)| muted));
     wpctl(&pw, &["set-mute", target, "0"]);
     state(&events, "wpctl sesi açtı", |s| s.default_sink().is_some_and(|d| !d.muted));
 
@@ -499,21 +541,33 @@ fn native_matches_wireplumber_mixer_on_props_path() {
         let v = pw.volumes(id);
         v.len() == 2 && near(v[0], 0.512) && near(v[1], 0.256)
     });
-    assert!(near(wpctl_volume(&pw, target).0, 0.8), "wpctl ilk kanalı okur");
+    let mut first = None;
+    eventually("wpctl get-volume", || {
+        first = wpctl_volume(&pw, target);
+        first.is_some()
+    });
+    assert!(first.is_some_and(|(v, _)| near(v, 0.8)), "wpctl ilk kanalı okur: {first:?}");
     wpctl(&pw, &["set-volume", target, "0.8"]);
     volumes_reach(&pw, id, "wpctl eşitler", 0.512);
 
     // 4) Kaydırma patlaması: 30 göreli adım; yalnızca son değer önemli, adım kaybı yok.
     svc.set_volume(AudioTarget::DefaultSink, 0.3);
-    eventually("0.3", || near(wpctl_volume(&pw, target).0, 0.3));
+    eventually("0.3", || wpctl_volume(&pw, target).is_some_and(|(v, _)| near(v, 0.3)));
     for _ in 0..30 {
         svc.adjust_volume(AudioTarget::DefaultSink, 0.01);
     }
-    eventually("patlama sonucu", || near(wpctl_volume(&pw, target).0, 0.6));
+    eventually("patlama sonucu", || wpctl_volume(&pw, target).is_some_and(|(v, _)| near(v, 0.6)));
     state(&events, "durum 0.6", |s| s.default_sink().is_some_and(|d| near(f64::from(d.volume), 0.6)));
 
     // 5) Tanı raporu: yol, neden ve wpctl karşılaştırması; ad yok.
-    let report = diagnose(&svc);
+    // Raporun wpctl karşılaştırması ürün sınırıyla (900 ms, IPC yanıtı 2 sn içinde) alınır; yük
+    // altında aşılırsa rapor "(wpctl zaman aşımı)" der. Test sonucu bekler: o satır gelene dek
+    // raporu yeniden ister (canlılık sınırına dek).
+    let mut report = diagnose(&svc);
+    let deadline = Instant::now() + WAIT;
+    while report.contains("wpctl zaman aşımı") && Instant::now() < deadline {
+        report = diagnose(&svc);
+    }
     println!("{report}");
     assert!(report.contains("yazım yolu ([audio] backend): native"), "{report}");
     assert!(report.contains(&format!("varsayılan çıkış: düğüm {id} (Audio/Sink)")), "{report}");

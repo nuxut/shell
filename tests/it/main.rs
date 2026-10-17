@@ -19,6 +19,7 @@ mod hyprland_service;
 mod i18n;
 mod idle_logind;
 mod install_bins;
+mod install_pkgs;
 mod install_reexec;
 mod install_source_trust;
 mod locale_changed;

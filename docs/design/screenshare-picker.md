@@ -1,6 +1,6 @@
 # Ekran paylaşım seçicisi (`nuxut-sharepicker`)
 
-(t126 ilk yarısı). İşçi, 2026-10-14.
+Tarih: 2026-10-14.
 
 Bir uygulama ekran paylaşımı istediğinde (xdg-desktop-portal `ScreenCast`, Hyprland'de arka uç
 xdg-desktop-portal-hyprland = xdph) xdph bir **seçici süreci** başlatır ve ondan ne paylaşılacağını
@@ -101,10 +101,19 @@ Hyprland'in kendi ayarında olağan; xdph'in hyprlang'inde **canlı doğrulanmad
 - **Görünüm:** `src/sharepicker_view.rs`. Odaklı çıkışta layer-shell `Overlay` (tam ekran,
   `KeyboardMode::Exclusive`, karartılmış zemin) + framework `Dialog`. Sekmeler `SegmentedButton`
   (Ekran / Pencere / Bölge), listeler `List`/`ListItem`, "Bu izni hatırla" anahtarlı `ListItem`.
-  - Ekran: çıkış adı; alt metin çıkış açıklaması · boyut · yenileme (boyut **mantıksal**;
-    fiziksel kip çözünürlüğü framework'te yok — talep aşağıda).
-  - Pencere: başlık (boşsa "Adsız pencere") + sınıf; ön ikon sınıfın Nerd Font glifi
-    (`ui::app_glyph`, yoksa genel pencere ikonu). Önizleme yok (aşağıda).
+  - Ekran: çıkış adı; alt metin çıkış açıklaması · boyut · yenileme. Boyut gerçek çözünürlük
+    (`OutputInfo::physical_size`); bilinmiyorsa mantıksal.
+  - Pencere: başlık (boşsa "Adsız pencere") + sınıf; ön ikon sınıftan çözülen gerçek uygulama
+    ikonu (framework `AppIcons`/`AppIconTextures`: app_id → .desktop → tema ikonu; arka planda,
+    kullanıcı/Flatpak ikonları yalıtılmış süreçte). Çözülene ya da bulunamazsa yedek: Nerd glifi
+    (`ui::app_glyph`), o da yoksa genel pencere ikonu.
+  - Pencere önizlemesi: listenin sağında bölme (alanın %42'si); seçili pencerenin tek karesi,
+    en-boy korunarak. Pencere sekmesi ilk açıldığında (tembel; Ekran/Bölge seçen kullanıcı için
+    hiçbir pencere yakalanmaz) `toplevels_start`, xdph listesindeki tam adres
+    `toplevel_by_hyprland_address` ile tutamaca çevrilir, her pencere bir kez
+    `capture(Toplevel, CaptureOptions::preview(bölme px))` (en çok 32). Kare gelmezse (gizli
+    çalışma alanı, `noscreenshare`, zaman aşımı) genel ikon. Pikseller yalnız bellekte, loglanmaz
+    (yalnız hata türü). Compositor pencere yakalamayı sunmuyorsa bölme yok, liste tam genişlik.
   - Bölge: "Paylaş" kartı kapatır, her çıkışa bir `Overlay` seçim katmanı açar (klavye kartın
     çıkışında). Sürükle: bölge (taşı/boyutlandır, ok tuşları); sürüklemesiz tıklama ya da seçimsiz
     Enter: o çıkışın tamamı (bölge olarak). Esc/sağ tık karta döner. Canlı ekran karartılır (kare
@@ -114,8 +123,24 @@ Hyprland'in kendi ayarında olağan; xdph'in hyprlang'inde **canlı doğrulanmad
   liste ↔ "Bu izni hatırla", Space anahtarı çevirir. Seçimsiz Enter/Paylaş kartı kapatmaz, durum
   satırında uyarı. **Yazı-önü kapısı:** kart ilk sunulduktan sonra 400 ms tuşlar yok sayılır
   (başka pencerede basılmakta olan Enter ekranı paylaşmasın; polkit diyaloğuyla aynı gerekçe).
-  Ön seçim yok: yanlışlıkla paylaşım olmasın diye kullanıcı açıkça seçer (karar,
-  2026-10-14; onayına açık).
+  Ön seçim yok: yanlışlıkla paylaşım olmasın diye kullanıcı açıkça seçer (karar:
+  2026-10-14).
+- **Oturum kilidi (2026-10-17):** seçici ilk çıkışta logind'i yalnız okumak için izler
+  (`services::idle::IdleLogind`, pasif: ipucu yazmaz, inhibitör almaz; oturum PID'den, olmazsa
+  `session/auto`). Kapı `services::sharepicker::LockGate`:
+  - `LockedHint` doğruysa istek **reddedilir**: seçim yazılmadan çıkılır (xdph iptal sayar),
+    seçici o anda açıksa kapanır. Framework yakalama kapısına `set_session_locked_hint(true)`
+    verilir: yürüyen önizleme yakalamaları `Locked` ile biter, çevrilen kare teslim edilmez
+    (framework capture.md §4).
+  - **Kapalı-güvenli (2026-10-17, güvenlik incelemesi "fail-open" bulgusu):** yalnız logind'den
+    okunmuş, oturumumuza ait `LockedHint = false` açar. Bilinmeyen/okunamayan durum kilitli
+    sayılır ve istek reddedilir: logind yok, oturum çözülemedi, özellik okunamadı, bağlantı koptu,
+    izleyici başlatılamadı ya da 5 sn (`LOCK_DEADLINE`) içinde yanıt yok. Yanıt beklenirken
+    framework yakalama kapısı kapalı (`set_session_locked_hint(true)`), önizleme istenmez,
+    "Paylaş" işlemez. Bedel: logind'siz sistemde seçici her isteği reddeder.
+    Önceki "logind yoksa kilitsiz say" kuralı kaldırıldı.
+  Sınır: kilitleyicinin başlaması ile sinyalin gelmesi arasındaki kısa aralıkta biten bir
+  önizleme kartta görünmüş olabilir; kilit gelince kart kapanır, seçim verilmez.
 - **Dil:** `shell-sharepicker-*` anahtarları (tr kaynak, en).
   Bölge boyut etiketi `shell-screenshot-size`'ı yeniden kullanır.
 
@@ -137,8 +162,6 @@ Hyprland'in kendi ayarında olağan; xdph'in hyprlang'inde **canlı doğrulanmad
 
 ## Kapsam dışı (ilk yarı)
 
-- Pencere önizlemesi (küçük resim): framework'te güvenli bir toplevel yakalama yolu yok
-  (hyprland-toplevel-export ya da ext-image-copy-capture istemcisi) → framework talebi.
 - Bölge katmanında pencere vurgusu/tıkla-pencere: pencere geometrisi için Hyprland IPC gerekir;
   ilk yarıda yok (tıklama tüm çıkışı seçer).
 - Gerçek paylaşım oturumuyla uçtan uca deneme yapılmadı (görev kuralı); sözleşme ikili analizi +
@@ -153,6 +176,9 @@ Hyprland'in kendi ayarında olağan; xdph'in hyprlang'inde **canlı doğrulanmad
 3. Uygulama sınıfından (app_id) tema ikonu çözümü (freedesktop ikon teması) — Nerd glifi olmayan
    uygulamalarda gerçek ikon.
 
+Üçü de karşılandı (2026-10-16): 1 `OutputInfo::physical_size`, 2 framework e8a6046 (capture.md),
+3 framework e7baec5 (app-icons.md); seçici bunları kullanıyor (yukarıda).
+
 ## Kararlar (2026-10-14; kullanıcı onayına açık)
 
 - **Ön seçim yok, seçimsiz Enter işlemez** (400 ms kapı dahil): ONAY — paylaşım açık seçim ister.
@@ -162,3 +188,9 @@ Hyprland'in kendi ayarında olağan; xdph'in hyprlang'inde **canlı doğrulanmad
   bloğunun birleşmesi) kullanıcının oturumunda gerekir → kullanıcıya sorulmak üzere PARK; o zamana
   dek bu üç nokta "doğrulanmadı" olarak kalır.
 - Framework talepleri (yukarıda) framework'e iletildi (2026-10-14).
+- **Gerçek ikon + önizleme bölmesi** (2026-10-16): önizleme satır
+  içinde değil sağ bölmede, yalnız seçili pencere — liste satırı yüksekliği değişmez, kart
+  boyutu sabit kalır; yakalama Pencere sekmesi açılınca başlar (tembel, en çok 32 pencere).
+  Canlı Hyprland denemesi yalnız kendi `kitty --class nuxut-test`
+  penceremizle (adres `hyprctl clients -j`'de kendi PID'imizle doğrulanarak), ayrı örnek,
+  odak çalmadan, girdisiz; görüntüler yalnız seçici yüzeyinin kırpımı ve silindi.

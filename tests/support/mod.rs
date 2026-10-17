@@ -8,14 +8,17 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+pub mod liveness;
 pub mod repo;
 pub mod skip;
 pub mod udisks;
 
-/// Olay/koşul beklemelerinin üst sınırı: yalnız güvenlik ağı (koşul gelince hemen döner). Yük
-/// altında (paralel derleme + test, özel PipeWire/WirePlumber/D-Bus açılışı) 5 sn yetmiyordu
-/// (audio_service, 2026-10-15); başarılı koşu süresi değişmez.
-pub const WAIT: Duration = Duration::from_secs(30);
+/// Olay/koşul beklemelerinin üst sınırı: yalnız güvenlik ağı (koşul gelince hemen döner);
+/// gerekçe [`liveness`]'ta.
+pub const WAIT: Duration = liveness::LIVENESS;
+// Her test ikilisi bu modülü içerir; PROMPT'u kullanmayanlarda (nuxut-bluez, nuxut-nm) uyarı olmasın.
+#[allow(unused_imports)]
+pub use liveness::PROMPT;
 
 pub struct PrivateBus {
     child: Child,

@@ -18,10 +18,10 @@ use zbus::blocking;
 use zbus::message::Type as MsgType;
 use zbus::zvariant::Value;
 
-/// Canlılık sınırı: beklenen olay/sonuç için üst sınır, süre varsayımı DEĞİL — beklemeler sonuç
-/// gelince hemen döner; bu yalnızca takılan testi sonunda düşürür. Derleme yükü altında (aynı
-/// makinede eşzamanlı derlemeler) gerçek işçi süreci başlatıp çözmek tek başına birkaç saniyeyi aşabilir.
-pub const LIVENESS: Duration = Duration::from_secs(120);
+/// Canlılık sınırı (tek kaynak `liveness.rs`).
+#[path = "liveness.rs"]
+mod liveness;
+pub use liveness::LIVENESS;
 const WAIT: Duration = LIVENESS;
 
 /// Yalnızca bu test için `dbus-daemon`. Servis dizini yok: hiçbir şey D-Bus ile etkinleşmez.

@@ -2,7 +2,8 @@
 //! kartının düğmelerini gerçek logind olmadan etkin çizdirir. Hiçbir eylem uygulanmaz: her
 //! eylem çağrısı stderr'e `ÇAĞRI: <yöntem>` yazar ve hata döner (kart hatayı gösterir).
 //! İstisna `Session.Lock`: gerçek logind gibi yalnızca oturumun `Lock` sinyalini yayınlar
-//! (kabuğun kilit tetikleyicisinin canlı testi).
+//! (kabuğun kilit tetikleyicisinin canlı testi). `Session.SetLockedHint` gerçek logind gibi
+//! `LockedHint` özelliğini değiştirir ve `PropertiesChanged` yayınlar (kilit kapısı testleri).
 //!
 //! ```sh
 //! dbus-run-session -- sh betik.sh       # özel oturum bus'ı
@@ -53,7 +54,10 @@ impl Manager {
     }
 }
 
-struct Session;
+#[derive(Default)]
+struct Session {
+    locked_hint: bool,
+}
 
 #[zbus::interface(name = "org.freedesktop.login1.Session")]
 impl Session {
@@ -66,6 +70,16 @@ impl Session {
     fn terminate(&self) -> zbus::fdo::Result<()> {
         Err(refuse("Terminate"))
     }
+    /// Gerçek logind gibi: yalnız ipucu değişir (kilit uygulamaz).
+    async fn set_locked_hint(&mut self, locked: bool, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> zbus::fdo::Result<()> {
+        eprintln!("ÇAĞRI: SetLockedHint({locked})");
+        self.locked_hint = locked;
+        self.locked_hint_changed(&emitter).await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+    #[zbus(property)]
+    fn locked_hint(&self) -> bool {
+        self.locked_hint
+    }
     #[zbus(signal, name = "Lock")]
     async fn lock_signal(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }
@@ -74,7 +88,7 @@ fn main() -> zbus::Result<()> {
     let _conn = zbus::blocking::connection::Builder::session()?
         .name("org.freedesktop.login1")?
         .serve_at("/org/freedesktop/login1", Manager)?
-        .serve_at(SESSION_PATH, Session)?
+        .serve_at(SESSION_PATH, Session::default())?
         .build()?;
     eprintln!("sahte logind hazır");
     loop {

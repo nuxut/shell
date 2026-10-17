@@ -1,6 +1,7 @@
 //! Görünüm paket kataloğu: eksik paketlerin deposu ve hedefi, Ayarlar'ın ikon/imleç seçicisinde
-//! "kurulabilir" olarak gösterdiği tema aileleri (ADR-0004 §9). Nuxut paket kurmaz; Ayarlar bu
-//! bilgiden kurulum komutunu gösterir.
+//! "kurulabilir" olarak gösterdiği tema aileleri (ADR-0004 §9). Resmî depo paketlerini Ayarlar'ın
+//! "Kur" düğmesi kök yardımcının `packages` alanıyla kurar (yönetici onayı; 2026-10-17); AUR paketi
+//! için Ayarlar kurulum komutunu gösterir (kök komutu değil).
 //!
 //! Aile tanıma kurulu tema kimliğinin (dizin adı) küçük harfli önekiyle yapılır: paketler birden
 //! çok varyant kurar (`Qogir-cursors`, `Qogir-white-cursors`), dizin adları paketten pakete değişir.
@@ -156,6 +157,18 @@ mod tests {
         assert!(ICON_FAMILIES[0].matches(RECOMMENDED_ICON_THEME));
         for f in CURSOR_FAMILIES.iter().chain(&ICON_FAMILIES) {
             assert!(!f.prefix.is_empty() && f.prefix == f.prefix.to_ascii_lowercase(), "{}", f.family);
+        }
+    }
+
+    /// Ayarlar'ın "Kur" düğmesi her resmî depo paketini kök yardımcının `packages` alanıyla kurar:
+    /// katalogdaki her depo paketi yardımcının sabit listesinde olmalı (2026-10-17).
+    #[test]
+    fn every_repo_package_is_installable_by_the_helper() {
+        let allowed = nuxut_system_helper::packages::ALLOWED;
+        let repo = PACKAGES.iter().filter(|(_, s, _)| *s == Source::Repo).map(|(n, ..)| *n);
+        let families = CURSOR_FAMILIES.iter().chain(ICON_FAMILIES.iter()).filter(|f| f.source == Source::Repo).map(|f| f.package);
+        for name in repo.chain(families) {
+            assert!(allowed.contains(&name), "{name} yardımcının listesinde yok");
         }
     }
 

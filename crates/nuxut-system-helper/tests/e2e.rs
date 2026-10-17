@@ -322,3 +322,39 @@ fn bad_arguments_exit_2_without_output() {
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
 }
+
+/// Paket alanı (2026-10-17): yalnız listedeki adlar, sabit pacman argümanları, temiz ortam; liste
+/// dışı ad hiçbir şey çalıştırmaz.
+#[test]
+fn packages_install_runs_pacman_with_fixed_arguments() {
+    let t = tempfile::tempdir().unwrap();
+    let (root, bin) = (t.path().join("root"), t.path().join("bin"));
+    std::fs::create_dir_all(&root).unwrap();
+    for p in [t.path(), &root] {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let log = t.path().join("pacman.log");
+    script(&bin.join("pacman"), &format!("printf '%s\\n' \"$*\" \"$HOME\" > {}\necho 'resolving dependencies...'", log.display()));
+    let env = Env { _t: t, root, bin };
+    let (ok, ev) = run(&env, &["packages", "install", "qt6ct", "breeze"]);
+    assert!(ok, "{ev:#?}");
+    let seen = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(seen, "-S --needed --noconfirm -- qt6ct breeze\n\n", "argümanlar sabit, HOME geçmez");
+    assert!(ev.iter().any(|e| matches!(e, Event::Log { line, .. } if line.contains("resolving"))));
+    assert!(ev.iter().any(|e| matches!(e, Event::PackagesResult { outcome: Outcome::Applied, names, .. } if names == &["qt6ct", "breeze"])));
+    std::fs::remove_file(&log).unwrap();
+    for bad in [&["packages", "install", "linux"][..], &["packages", "install", "--overwrite", "x"], &["packages", "remove", "qt6ct"]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nuxut-system-helper"))
+            .args(bad)
+            .env("NUXUT_HELPER_TEST_ROOT", &env.root)
+            .env("NUXUT_HELPER_TEST_BIN", &env.bin)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{bad:?}");
+        assert!(!log.exists(), "liste dışı ad pacman'ı çalıştırmaz: {bad:?}");
+    }
+    script(&env.bin.join("pacman"), "exit 1");
+    let (ok, ev) = run(&env, &["packages", "install", "qt6ct"]);
+    assert!(!ok);
+    assert!(ev.iter().any(|e| matches!(e, Event::PackagesResult { outcome: Outcome::RolledBack, .. })));
+}

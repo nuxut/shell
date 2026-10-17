@@ -215,7 +215,7 @@ fn sleep_delay_signals_and_actions() {
 
     let t = std::time::Instant::now();
     drop(service);
-    assert!(t.elapsed() < Duration::from_secs(1), "temiz ve hızlı kapanış");
+    assert!(t.elapsed() < crate::support::PROMPT, "temiz ve hızlı kapanış: {:?}", t.elapsed());
 }
 
 #[test]

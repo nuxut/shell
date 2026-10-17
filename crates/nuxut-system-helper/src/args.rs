@@ -23,6 +23,8 @@ pub enum Command {
     Revert(Vec<Target>),
     /// Giriş ekranı alanı.
     Greeter(crate::greeter::Command),
+    /// Paket alanı.
+    Packages(crate::packages::Command),
 }
 
 fn targets(v: &str) -> Result<Vec<Target>, String> {
@@ -47,7 +49,8 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     match it.next() {
         Some("boot-theme") => {}
         Some("greeter") => return crate::greeter::parse(it).map(Command::Greeter),
-        _ => return Err("kullanım: nuxut-system-helper boot-theme|greeter status|apply|revert …".into()),
+        Some("packages") => return crate::packages::parse(it).map(Command::Packages),
+        _ => return Err("kullanım: nuxut-system-helper boot-theme|greeter status|apply|revert … | packages install <ad>…".into()),
     }
     let verb = it.next().ok_or("eylem eksik")?;
     let mut tgt: Option<Vec<Target>> = None;

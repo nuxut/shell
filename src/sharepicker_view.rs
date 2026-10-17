@@ -13,6 +13,7 @@
 //!   süre tuşlar yok sayılır (yazı-önü: başka pencerede basılan Enter ekranı paylaşmasın).
 //! - Sonuç [`PickerSetup::result`]'a yazılır; `run` dönünce ikili stdout'a tek satır basar.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,16 +22,19 @@ use nuxut::ui::{
     Dialog, DialogAction, DialogActionKind, DialogEvent, Icon, IconName, IconView, Label, List, ListEvent, ListItem,
     ListTrailing, Segment, SegmentedButton, TextRole, Ui, app_glyph, text_style,
 };
-use nuxut::render::TextAlign;
+use nuxut::render::{ImageData, ImageFit, ImageStyle, TextAlign, Texture, TextureOptions};
+use nuxut_image::{AppIconOptions, AppIconTextures, AppIcons};
 use nuxut::wayland::{Anchor, KeyboardMode, Layer, LayerSurfaceSpec};
 use nuxut::{
-    App, Border, Button, Color, Context, Corners, CursorShape, Key, KeyEvent, KeyState, OutputId, OutputInfo, Painter, Point,
-    PointerEvent, PointerKind, Rect, RectStyle, Size, SurfaceId, Theme, TimerId,
+    App, Border, Button, CaptureError, CaptureId, CaptureOptions, CaptureSource, CapturedImage, Color, Context, Corners,
+    CursorShape, Key, KeyEvent, KeyState, OutputId, OutputInfo, Painter, Point, PointerEvent, PointerKind, Rect, RectStyle,
+    Size, SurfaceId, Theme, TimerId, ToplevelEvent,
 };
 
 use crate::screenshot_view::{cursor_shape, outside, sel_key};
 use crate::services::screenshot::selection::{Outcome, SelKey, Selection};
-use crate::services::sharepicker::{Choice, Region, WindowList, display_text, valid_output_name};
+use crate::services::idle::{IdleLogind, LogindEvent, LogindOptions};
+use crate::services::sharepicker::{Choice, LOCK_DEADLINE, LockGate, Region, WindowList, display_text, valid_output_name};
 
 const NAMESPACE: &str = "nuxut-sharepicker";
 /// İlk sunumdan sonra tuşların yok sayıldığı süre (polkit diyaloğuyla aynı).
@@ -46,6 +50,65 @@ const LABEL_GAP: f32 = 8.0;
 const LABEL_PAD: (f32, f32) = (8.0, 4.0);
 /// Gösterilen çıkış açıklamasının en uzun hâli (karakter).
 const MAX_DESCRIPTION_CHARS: usize = 64;
+/// Önizlemesi istenen en çok pencere (her biri bir yakalama; runtime aynı anda 2 iş yürütür).
+const MAX_PREVIEWS: usize = 32;
+/// Pencere sekmesinde önizleme bölmesinin alan genişliğindeki payı.
+const PREVIEW_SHARE: f32 = 0.42;
+
+/// Bir pencerenin önizleme durumu (Hyprland adresiyle anahtarlı). Pikseller yalnızca bellekte,
+/// süreç kısa ömürlü; loglanmaz (framework capture.md, değişmez 9).
+enum Preview {
+    Pending(CaptureId),
+    Ready(ImageData),
+    Uploaded(Texture),
+    /// Yakalanamadı (gizli çalışma alanı, `noscreenshare`, zaman aşımı…): genel ikon.
+    Failed,
+}
+
+/// Pencere önizlemeleri: pencere listesi (ext-foreign-toplevel-list) tembel başlar, xdph'in
+/// verdiği tam adres `toplevel_by_hyprland_address` ile tutamaca çevrilir, her pencere bir kez
+/// yakalanır.
+#[derive(Default)]
+struct Previews {
+    /// Başlatma denendi (bir kez).
+    started: bool,
+    /// Pencere listesi çalışıyor: önizleme bölmesi gösterilir.
+    active: bool,
+    map: HashMap<u64, Preview>,
+}
+
+impl Previews {
+    /// Önizlemesi henüz istenmemiş adresler (sıra korunur, en çok [`MAX_PREVIEWS`] istek).
+    fn wanted(&self, windows: &WindowList) -> Vec<u64> {
+        let room = MAX_PREVIEWS.saturating_sub(self.map.len());
+        let mut out: Vec<u64> = Vec::new();
+        for w in &windows.windows {
+            if w.address != 0 && !self.map.contains_key(&w.address) && !out.contains(&w.address) {
+                out.push(w.address);
+            }
+        }
+        out.truncate(room);
+        out
+    }
+
+    /// Yakalama sonucu; bilinmeyen (iptal edilmiş) kimlik `false`.
+    fn finish(&mut self, id: CaptureId, image: Option<ImageData>) -> bool {
+        let Some(slot) = self.map.values_mut().find(|s| matches!(s, Preview::Pending(c) if *c == id)) else {
+            return false;
+        };
+        *slot = image.map_or(Preview::Failed, Preview::Ready);
+        true
+    }
+}
+
+/// Uygulama iletileri (arka plan thread'lerinden).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerMessage {
+    /// Uygulama ikonu çözüldü.
+    Icons,
+    /// logind kilit durumu.
+    Lock(LockGate),
+}
 
 /// Başlatma parametreleri.
 #[derive(Debug)]
@@ -97,6 +160,13 @@ struct Body {
     screen_names: Vec<String>,
     windows: List,
     window_ids: Vec<u32>,
+    /// `windows` satırlarının sınıfı ve Hyprland adresi (aynı sıra).
+    window_classes: Vec<String>,
+    window_addresses: Vec<u64>,
+    /// Satırın ön ikonu gerçek uygulama ikonuna çevrildi mi (yoksa glif/genel ikon).
+    window_icon_ready: Vec<bool>,
+    /// Önizleme bölmesinin yedek ikonu (önizleme yokken).
+    preview_icon: IconView,
     remember: ListItem,
     region_icon: IconView,
     region_text: Label,
@@ -135,6 +205,18 @@ pub struct SharePicker {
     shown_at: Option<Instant>,
     idle_timer: Option<TimerId>,
     done: bool,
+    /// Kartın yüzey ölçeği (ikon ve önizleme piksel boyutu).
+    scale: f32,
+    /// Uygulama ikonu çözücüsü (ilk kurulumda; bitince `message` yeniden çizim ister).
+    icons: Option<AppIcons>,
+    icon_textures: AppIconTextures,
+    previews: Previews,
+    /// Oturum kilidi kapısı (logind `LockedHint`): kilitliyken istek reddedilir, önizleme yok.
+    lock: LockGate,
+    /// logind izleyicisi (yalnız okur; ilk çıkışta başlar, seçici kapanınca durur).
+    logind: Option<IdleLogind>,
+    /// İlk logind yanıtı için süre (dolarsa bilinmiyor = kilitli, istek reddedilir).
+    lock_deadline: Option<TimerId>,
 }
 
 impl std::fmt::Debug for SharePicker {
@@ -168,18 +250,37 @@ impl SharePicker {
             shown_at: None,
             idle_timer: None,
             done: false,
+            scale: 1.0,
+            icons: None,
+            icon_textures: AppIconTextures::new(),
+            previews: Previews::default(),
+            lock: LockGate::Unknown,
+            logind: None,
+            lock_deadline: None,
         }
     }
 
-    fn finish(&mut self, cx: &mut Context<Self>, choice: Option<Choice>) {
+    fn finish(&mut self, cx: &mut Context<Self>, mut choice: Option<Choice>) {
         if self.done {
             return;
         }
+        if choice.is_some() && !self.lock.share_allowed() {
+            if !self.lock.must_reject() {
+                // İlk logind yanıtı bekleniyor (en çok çağrı zaman aşımı kadar): seçim sürer.
+                tracing::info!("kilit durumu henüz bilinmiyor; seçim bekletildi");
+                return;
+            }
+            choice = None;
+        }
         self.done = true;
+        self.logind = None;
         if let Some(choice) = choice
             && let Ok(mut r) = self.setup.result.lock()
         {
             *r = Some((choice, self.remember));
+        }
+        if self.previews.active {
+            cx.toplevels_stop();
         }
         cx.quit();
     }
@@ -227,6 +328,14 @@ impl SharePicker {
         let theme = cx.theme().clone();
         let now = Instant::now();
         let width = card_width(&theme, self.size);
+        if self.icons.is_none() {
+            let tx = cx.sender();
+            let sandbox = crate::services::image_sandbox::decoder(&crate::services::image_sandbox::new_shared());
+            let options = AppIconOptions { sandbox, theme: theme.desktop.icon_theme.clone(), dirs: None };
+            self.icons = Some(AppIcons::new(options, move || {
+                let _ = tx.send(PickerMessage::Icons);
+            }));
+        }
         let segments = vec![
             Segment::new(t!("shell-sharepicker-tab-screen")).with_icon(Icon::named(IconName::Monitor)),
             Segment::new(t!("shell-sharepicker-tab-window")).with_icon(Icon::named(IconName::Window)),
@@ -249,6 +358,8 @@ impl SharePicker {
         let line_h = status_line_height(cx, &theme);
         let mut region_icon = IconView::with_role(&theme, Icon::named(IconName::Fullscreen), TextRole::IconLarge);
         region_icon.measure(cx.text());
+        let mut preview_icon = IconView::with_role(&theme, Icon::named(IconName::Window), TextRole::IconLarge);
+        preview_icon.measure(cx.text());
         let area_h = theme.space(64).min((self.size.height - theme.space(80)).max(theme.space(24)));
         let mut body = Body {
             tabs,
@@ -256,6 +367,10 @@ impl SharePicker {
             screen_names: Vec::new(),
             windows: List::new(&theme),
             window_ids: Vec::new(),
+            window_classes: Vec::new(),
+            window_addresses: Vec::new(),
+            window_icon_ready: Vec::new(),
+            preview_icon,
             remember,
             region_icon,
             region_text,
@@ -306,6 +421,9 @@ impl SharePicker {
 
     fn fill_windows(&self, theme: &Theme, body: &mut Body) {
         body.window_ids.clear();
+        body.window_classes.clear();
+        body.window_addresses.clear();
+        body.window_icon_ready.clear();
         let mut items = Vec::new();
         for w in &self.setup.windows.windows {
             let title = if w.title.is_empty() { t!("shell-sharepicker-window-untitled") } else { w.title.clone() };
@@ -320,6 +438,9 @@ impl SharePicker {
             item.set_selected(self.selected_window == Some(w.id));
             items.push(item);
             body.window_ids.push(w.id);
+            body.window_classes.push(w.class.clone());
+            body.window_addresses.push(w.address);
+            body.window_icon_ready.push(false);
         }
         *body.windows.items_mut() = items;
     }
@@ -343,6 +464,9 @@ impl SharePicker {
         }
         self.tab = tab;
         self.show_hint = false;
+        if tab == Tab::Window {
+            self.start_previews(cx);
+        }
         let now = Instant::now();
         let mut body = self.body.take();
         if let Some(b) = body.as_mut() {
@@ -565,9 +689,14 @@ impl SharePicker {
     fn draw_picker(&mut self, cx: &mut Context<Self>, surface: SurfaceId, now: Instant, painter: &mut Painter) {
         let theme = cx.theme();
         let tab = self.tab;
+        let selected = self.selected_window;
+        let scale = self.scale.max(1.0).ceil() as u32;
+        let (icons, textures, previews) = (self.icons.as_ref(), &mut self.icon_textures, &mut self.previews);
         let (Some(dialog), Some(b)) = (self.dialog.as_mut(), self.body.as_mut()) else {
             return;
         };
+        // Doku yüklemesi süren ikon/önizleme: bir kare daha.
+        let mut pending = false;
         let mut ui = Ui::new(painter, theme, now);
         let c = &theme.colors;
         dialog.draw(&mut ui, |ui, rect| {
@@ -583,8 +712,23 @@ impl SharePicker {
                     b.screens.draw(ui);
                 }
                 Tab::Window if !b.window_ids.is_empty() => {
-                    b.windows.set_rect(theme, area, now);
+                    if let Some(icons) = icons {
+                        pending |= upgrade_window_icons(ui.painter, theme, icons, textures, b, scale);
+                    }
+                    // Önizleme bölmesi sağda (pencere listesi çalışıyorsa); seçili pencerenin karesi.
+                    let pane_w = if previews.active { (area.width * PREVIEW_SHARE).floor() } else { 0.0 };
+                    let gap = if pane_w > 0.0 { theme.space(3) } else { 0.0 };
+                    let list = Rect::new(area.x, area.y, area.width - pane_w - gap, area.height);
+                    b.windows.set_rect(theme, list, now);
                     b.windows.draw(ui);
+                    if pane_w > 0.0 {
+                        let pane = Rect::new(list.x + list.width + gap, area.y, pane_w, area.height);
+                        let address = selected
+                            .and_then(|id| b.window_ids.iter().position(|w| *w == id))
+                            .and_then(|i| b.window_addresses.get(i).copied());
+                        let preview = address.and_then(|a| previews.map.get_mut(&a));
+                        pending |= draw_preview(ui, theme, pane, preview, &mut b.preview_icon);
+                    }
                 }
                 Tab::Window => {
                     let s = b.empty.measure_in(ui.painter);
@@ -612,7 +756,7 @@ impl SharePicker {
             y += h + theme.space(2);
             b.status.draw(ui.painter, Point::new(rect.x, y), ui.fade(c.error));
         });
-        if ui.wants_frame() {
+        if ui.wants_frame() || pending {
             cx.request_frame(surface);
         }
     }
@@ -790,10 +934,64 @@ fn status_line_height(cx: &mut Context<SharePicker>, theme: &Theme) -> f32 {
     Label::new(t!("shell-sharepicker-pick-first"), text_style(theme, TextRole::Caption)).measure(cx.text()).height
 }
 
+/// Pencere satırlarının ön ikonunu, çözülen gerçek uygulama ikonuyla değiştirir (yedek: glif ya
+/// da genel ikon kalır). Döner: yüklenmesi süren doku var (bir kare daha).
+fn upgrade_window_icons(
+    painter: &mut Painter,
+    theme: &Theme,
+    icons: &AppIcons,
+    textures: &mut AppIconTextures,
+    b: &mut Body,
+    scale: u32,
+) -> bool {
+    // Satır ikonunun kenarı (ListItem ön ikonu: varsayılan rolün kutusu).
+    let side = IconView::new(theme, Icon::named(IconName::Window)).size().height.round().max(1.0) as u32;
+    let mut pending = false;
+    for (i, item) in b.windows.items_mut().iter_mut().enumerate() {
+        if b.window_icon_ready.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(class) = b.window_classes.get(i).filter(|c| !c.is_empty()) else { continue };
+        if let Some(texture) = textures.get(painter, icons, class, side, scale) {
+            pending |= !texture.is_ready();
+            item.set_leading(theme, Some(Icon::image(texture)));
+            b.window_icon_ready[i] = true;
+        }
+    }
+    pending
+}
+
+/// Önizleme bölmesi: seçili pencerenin karesi (en-boy korunur) ya da genel pencere ikonu.
+/// Döner: doku yüklemesi sürüyor.
+fn draw_preview(ui: &mut Ui, theme: &Theme, pane: Rect, preview: Option<&mut Preview>, fallback: &mut IconView) -> bool {
+    let c = &theme.colors;
+    let radii = theme.shape.small();
+    ui.painter.rect(pane, &RectStyle::filled(ui.fade(c.surface_container), radii));
+    if let Some(p) = preview
+        && let Preview::Ready(_) | Preview::Uploaded(_) = p
+    {
+        if let Preview::Ready(image) = p {
+            let texture = ui.painter.upload_texture(image.clone(), TextureOptions { mipmaps: false });
+            *p = Preview::Uploaded(texture);
+        }
+        if let Preview::Uploaded(texture) = p {
+            let inner = pane.inset(nuxut::Insets::uniform(theme.space(2)));
+            let style = ImageStyle { fit: ImageFit::Contain, radii, opacity: ui.alpha(), tint: None };
+            ui.painter.image(inner, texture, &style);
+            return !texture.is_ready();
+        }
+    }
+    fallback.draw_centered(ui.painter, pane.center(), ui.fade(c.on_surface_variant));
+    false
+}
+
 /// Ekran satırının alt metni: açıklama (varsa) · boyut · yenileme hızı.
 fn screen_detail(o: &OutputInfo) -> String {
-    let w = o.size.width.max(0.0).round() as u32;
-    let h = o.size.height.max(0.0).round() as u32;
+    // Gerçek çözünürlük: fiziksel boyut (mantıksalla aynı yönde); bilinmiyorsa mantıksal.
+    let (w, h) = match o.physical_size {
+        (0, _) | (_, 0) => (o.size.width.max(0.0).round() as u32, o.size.height.max(0.0).round() as u32),
+        p => p,
+    };
     let size = if o.refresh > 0.0 {
         t!(
             "shell-sharepicker-screen-mode",
@@ -835,9 +1033,12 @@ fn handle_rects(r: Rect) -> [Rect; 4] {
 }
 
 impl App for SharePicker {
-    type Message = ();
+    type Message = PickerMessage;
 
     fn output_added(&mut self, cx: &mut Context<Self>, output: &OutputInfo) {
+        if self.logind.is_none() && !self.done {
+            self.watch_lock(cx);
+        }
         if !valid_output_name(&output.name) {
             tracing::warn!("adı sözleşmeye uymayan çıkış atlandı");
         } else if !self.outputs.iter().any(|o| o.id == output.id) {
@@ -892,8 +1093,9 @@ impl App for SharePicker {
         if Some(surface) != self.surface {
             return;
         }
-        let changed = self.size != size;
+        let changed = self.size != size || self.scale != scale;
         self.size = size;
+        self.scale = scale;
         if changed {
             self.rebuild(cx);
         }
@@ -928,6 +1130,13 @@ impl App for SharePicker {
     }
 
     fn timer(&mut self, cx: &mut Context<Self>, id: TimerId) {
+        if self.lock_deadline == Some(id) {
+            self.lock_deadline = None;
+            if self.lock == LockGate::Unknown {
+                tracing::warn!("logind yanıt vermedi; kilit durumu bilinmiyor, istek reddediliyor");
+            }
+            return self.apply_lock(cx, self.lock.after_deadline());
+        }
         if self.idle_timer == Some(id) {
             self.idle_timer = None;
             tracing::info!("etkileşimsiz süre doldu; iptal");
@@ -950,6 +1159,35 @@ impl App for SharePicker {
         self.rebuild(cx);
     }
 
+    fn message(&mut self, cx: &mut Context<Self>, message: PickerMessage) {
+        match message {
+            // Uygulama ikonu çözüldü: satır ikonları bir sonraki karede.
+            PickerMessage::Icons => self.redraw(cx),
+            PickerMessage::Lock(gate) => self.apply_lock(cx, gate),
+        }
+    }
+
+    fn toplevel(&mut self, cx: &mut Context<Self>, event: ToplevelEvent) {
+        // Adres yanıtı `Added`'dan önce gelir: yeni pencerenin tutamacı artık aranabilir.
+        if let ToplevelEvent::Added(_) = event {
+            self.request_previews(cx);
+        }
+    }
+
+    fn captured(&mut self, cx: &mut Context<Self>, id: CaptureId, result: Result<CapturedImage, CaptureError>) {
+        let image = match result {
+            Ok(c) => Some(c.image),
+            Err(e) => {
+                // Yalnızca hata türü (pencere kimliği/başlığı yok).
+                tracing::info!(error = ?e, "pencere önizlemesi alınamadı");
+                None
+            }
+        };
+        if self.previews.finish(id, image) && self.tab == Tab::Window {
+            self.redraw(cx);
+        }
+    }
+
     fn draw(&mut self, cx: &mut Context<Self>, surface: SurfaceId, now: Instant, painter: &mut Painter) {
         if Some(surface) == self.surface {
             self.draw_picker(cx, surface, now, painter);
@@ -960,6 +1198,82 @@ impl App for SharePicker {
 }
 
 impl SharePicker {
+    /// Pencere sekmesi ilk açıldığında pencere listesini başlatır (compositor pencere yakalamayı
+    /// sunuyorsa). Tembel: Ekran/Bölge seçen kullanıcı için hiçbir pencere yakalanmaz.
+    fn start_previews(&mut self, cx: &mut Context<Self>) {
+        if !self.lock.previews_allowed()
+            || self.previews.started || self.setup.windows.windows.is_empty() || !cx.capture_support().toplevel {
+            return;
+        }
+        self.previews.started = true;
+        match cx.toplevels_start() {
+            Ok(()) => {
+                self.previews.active = true;
+                self.request_previews(cx);
+            }
+            Err(e) => tracing::info!(error = ?e, "pencere listesi yok; önizleme gösterilmez"),
+        }
+    }
+
+    /// Tutamacı bilinen, henüz istenmemiş pencereler için önizleme yakalaması ister.
+    fn request_previews(&mut self, cx: &mut Context<Self>) {
+        if !self.previews.active || !self.lock.previews_allowed() {
+            return;
+        }
+        let (w, h) = self.preview_pixels(cx.theme());
+        for address in self.previews.wanted(&self.setup.windows) {
+            let Some(id) = cx.toplevel_by_hyprland_address(address) else { continue };
+            let capture = cx.capture(CaptureSource::Toplevel(id), CaptureOptions::preview(w, h));
+            self.previews.map.insert(address, Preview::Pending(capture));
+        }
+    }
+
+    /// logind'i yalnız okumak için izler (`LockedHint`); durum `PickerMessage::Lock` ile gelir.
+    /// Kapalı-güvenli: durum bilinene dek framework yakalama kapısı kapalı; başlatılamazsa ya da
+    /// [`LOCK_DEADLINE`] içinde yanıt gelmezse istek reddedilir (`LockGate`).
+    fn watch_lock(&mut self, cx: &mut Context<Self>) {
+        cx.set_session_locked_hint(true);
+        self.lock_deadline = Some(cx.set_timer(LOCK_DEADLINE));
+        let tx = cx.sender();
+        let spawned = IdleLogind::spawn(LogindOptions::default(), move |e| {
+            if let LogindEvent::State(s) = e {
+                let _ = tx.send(PickerMessage::Lock(LockGate::from_logind(s.available, s.has_session, s.locked_hint)));
+            }
+        });
+        match spawned {
+            Ok(l) => self.logind = Some(l),
+            Err(e) => {
+                tracing::warn!("logind izlenemedi; kilit durumu bilinmiyor, istek reddediliyor: {e}");
+                self.apply_lock(cx, LockGate::from_logind(false, false, false));
+            }
+        }
+    }
+
+    /// Kilit durumu değişti: kilitliyse istek reddedilir (yürüyen önizlemeler framework kapısında
+    /// `Locked` ile biter); açıksa bekleyen önizlemeler istenir.
+    fn apply_lock(&mut self, cx: &mut Context<Self>, gate: LockGate) {
+        if self.done || self.lock == gate {
+            return;
+        }
+        self.lock = gate;
+        cx.set_session_locked_hint(!gate.previews_allowed());
+        if gate.must_reject() {
+            tracing::info!("oturum kilitli ya da kilit durumu okunamadı: ekran paylaşım isteği reddedildi");
+            self.finish(cx, None);
+        } else if self.tab == Tab::Window {
+            self.start_previews(cx);
+            self.request_previews(cx);
+        }
+    }
+
+    /// Önizleme bölmesinin fiziksel piksel boyutu (yakalama bu kutuya sığdırılır).
+    fn preview_pixels(&self, theme: &Theme) -> (u32, u32) {
+        let width = card_width(theme, self.size) * PREVIEW_SHARE;
+        let height = self.body.as_ref().map_or(theme.space(64), |b| b.area_h);
+        let px = |v: f32| ((v * self.scale.max(1.0)).ceil() as u32).clamp(16, 2048);
+        (px(width), px(height))
+    }
+
     fn refresh_screens(&mut self, cx: &mut Context<Self>) {
         let theme = cx.theme().clone();
         if let Some(name) = &self.selected_screen
@@ -994,6 +1308,25 @@ mod tests {
         let hs = handle_rects(r);
         assert_eq!(hs[0].center(), Point::new(10.0, 20.0));
         assert_eq!(hs[3].center(), Point::new(110.0, 70.0));
+    }
+
+    #[test]
+    fn previews_want_each_known_address_once_and_are_bounded() {
+        use crate::services::sharepicker::SharedWindow;
+        let w = |id: u32, address: u64| SharedWindow { id, class: "kitty".into(), title: String::new(), address };
+        let list = WindowList { windows: vec![w(1, 10), w(2, 0), w(3, 30), w(4, 10)], ..WindowList::default() };
+        let mut p = Previews::default();
+        // Adressiz (0) pencere istenmez; aynı adres bir kez.
+        assert_eq!(p.wanted(&list), [10, 30]);
+        p.map.insert(10, Preview::Failed);
+        assert_eq!(p.wanted(&list), [30], "istenmiş adres yeniden istenmez");
+        let many = WindowList { windows: (1..=100).map(|i| w(i, u64::from(i))).collect(), ..WindowList::default() };
+        let mut p = Previews::default();
+        assert_eq!(p.wanted(&many).len(), MAX_PREVIEWS);
+        for a in 1..=5 {
+            p.map.insert(a, Preview::Failed);
+        }
+        assert_eq!(p.wanted(&many).len(), MAX_PREVIEWS - 5, "toplam istek sınırlı");
     }
 
     #[test]

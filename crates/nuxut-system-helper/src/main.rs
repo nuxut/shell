@@ -8,6 +8,7 @@ use nuxut_system_helper::cmd::Bins;
 use nuxut_system_helper::events::Events;
 use nuxut_system_helper::greeter::{Command as GreeterCommand, Greeter};
 use nuxut_system_helper::ops::Ops;
+use nuxut_system_helper::packages::{Command as PackagesCommand, Packages};
 use nuxut_system_helper::safefs::Root;
 
 #[cfg(all(feature = "test-root", not(debug_assertions)))]
@@ -67,6 +68,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Command::Packages(PackagesCommand::Install(names)) = &command {
+        let events = Events::stdout();
+        let ok = Packages { bins: &bins, events: &events }.install(names);
+        return if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     if let Command::Greeter(cmd) = command {
         let ops = Ops::new(root);
         let events = Events::stdout();
@@ -89,7 +95,7 @@ fn main() -> ExitCode {
         }
         Command::Apply(req) => helper.apply(&req),
         Command::Revert(targets) => helper.revert(&targets),
-        Command::Greeter(_) => false,
+        Command::Greeter(_) | Command::Packages(_) => false,
     };
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }

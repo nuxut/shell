@@ -89,8 +89,12 @@ Genel "bazı uygulamalara aktarılamadı" yerine dosya başına:
 - `read_only` / `hard_link` / `symlink_broken` ve bağlar artık devralınır (aşağıda); rapora
   `taken_over` olarak girer: "`~/.config/gtk-4.0/gtk.css` Nuxut'a devredildi; birleşik görünümü
   kapatmak önceki hâlini geri koyar."
-- `not_owned`: "… root'a ait; Nuxut değiştiremez." + kopyalanabilir
-  `sudo chown $USER <yol>` önerisi (Nuxut kendisi çalıştırmaz).
+- `not_owned` (düz dosya): kök gerektirmeden devralınır (framework bbf4a02, 2026-10-17): dosya
+  okunabiliyorsa ve dizini yazılabilir, yapışkan değil ya da kullanıcınınsa yanına yazılan dosyanın
+  `rename`'iyle; biçim `foreign:<izin>`, geri alma içerik ve izni geri koyar, sahip kullanıcı
+  olur (kök olmadan sahiplik geri verilemez). Okunamayan ya da başkasının yapışkan dizinindeki
+  dosya için "… başka bir kullanıcıya ait; Nuxut şimdilik değiştiremiyor." Kök komutu (`chown`)
+  önerilmez (kullanıcı kararı 2026-10-17).
 - `store`: "… Nix/Guix tarafından yönetiliyor; oradan değiştirin." (devralma yok).
 
 ### Devralma — varsayılan (uygulandı, 2026-10-16)

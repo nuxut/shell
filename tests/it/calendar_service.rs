@@ -95,7 +95,7 @@ impl FakeCalendar {
     async fn occurrences_changed(emitter: &zbus::object_server::SignalEmitter<'_>, from: i64, to: i64) -> zbus::Result<()>;
 }
 
-const WAIT: Duration = Duration::from_secs(5);
+const WAIT: Duration = crate::support::WAIT;
 
 #[test]
 fn queries_range_and_requeries_on_change_signal() {

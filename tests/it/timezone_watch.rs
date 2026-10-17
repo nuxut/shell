@@ -8,12 +8,12 @@
 //! sinyali reddedilir, temiz kapanış.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nuxut_shell::services::timezone::{TIMEDATE1, TIMEDATE1_PATH, TimezoneEvent, TimezoneOptions, TimezoneWatch};
 use zbus::zvariant::Value;
 
-use crate::support::{Events, PrivateBus, channel};
+use crate::support::{Events, PrivateBus, WAIT, channel};
 
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 
@@ -36,7 +36,8 @@ fn emit(conn: &zbus::blocking::Connection, dest: Option<&str>, prop: &str, value
 /// Dinleyicinin aboneliği kurulana kadar (hazır olayı yok) aralıklı yayınlar; olayı bekler.
 fn emit_until_seen(conn: &zbus::blocking::Connection, events: &Events<TimezoneEvent>, zone: &str) {
     let want = TimezoneEvent::Changed { zone: Some(zone.to_owned()) };
-    for _ in 0..50 {
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
         emit(conn, None, "Timezone", Value::from(zone));
         if events.collect(Duration::from_millis(100)).contains(&want) {
             return;
@@ -64,9 +65,9 @@ fn timezone_changes_are_reported_across_restarts() {
     emit(&fake, None, "Timezone", Value::from("Asia/Tokyo"));
     events.wait_for("yeniden gelen timedated", |e| *e == TimezoneEvent::Changed { zone: Some("Asia/Tokyo".into()) });
 
-    let t = std::time::Instant::now();
+    let t = Instant::now();
     drop(service);
-    assert!(t.elapsed() < Duration::from_secs(1), "temiz ve hızlı kapanış");
+    assert!(t.elapsed() < crate::support::PROMPT, "temiz ve hızlı kapanış: {:?}", t.elapsed());
 }
 
 #[test]

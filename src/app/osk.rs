@@ -22,12 +22,12 @@ use std::time::Instant;
 
 use nuxut::{
     Anchor, Animated, Context, CursorShape, Insets, KeyboardMode, Layer, LayerSurfaceSpec, OutputId, Painter, Point,
-    PointerEvent, Rect, Size, SurfaceId,
+    PointerEvent, Rect, Size, SurfaceId, TimerId, TouchEvent, TouchId, TouchPhase,
 };
 
 use super::Shell;
 use crate::ipc::OskAction;
-use crate::osk_view::{KeyInput, KeyboardView, Shape, shadow_margin};
+use crate::osk_view::{KeyInput, KeyboardView, Shape, TOUCH_HOLD, TouchInput, shadow_margin};
 use crate::services::osk::place::{self, Drag, GrabFrame, Placement};
 use crate::services::osk::{Command, Emit, KeyAction, Layout, Osk, OskView, status_json};
 
@@ -65,6 +65,10 @@ struct Open {
     committed_origin: Point,
     exclusive_zone: i32,
     drag: Option<DragSession>,
+    /// Basılı tutulan tuşun sahibi temas (`TouchInput::Hold`); başka temasın bırakması onu kesmez.
+    touch_owner: Option<TouchId>,
+    /// Dokunma bekleme zamanlayıcısı (`TOUCH_HOLD`).
+    hold_timer: Option<TimerId>,
 }
 
 #[derive(Debug)]
@@ -224,6 +228,8 @@ impl Shell {
             committed_origin: plan.origin,
             exclusive_zone: plan.exclusive_zone,
             drag: None,
+            touch_owner: None,
+            hold_timer: None,
         });
         self.osk_sync_focus_grabs(cx);
         tracing::info!(output = %self.screens[idx].name, placement = ?self.osk.placement, "ekran klavyesi açıldı");
@@ -278,6 +284,9 @@ impl Shell {
 
     fn osk_hide(&mut self, cx: &mut Context<Self>) {
         let Some(open) = self.osk.open.take() else { return };
+        if let Some(t) = open.hold_timer {
+            cx.cancel_timer(t);
+        }
         if let Some(osk) = &mut self.osk.osk {
             let emits = osk.reset();
             apply(cx, &emits);
@@ -363,6 +372,82 @@ impl Shell {
         // Düzen tuşu ya da gizleme kutucuğa yansısın.
         self.osk_publish(cx);
         true
+    }
+
+    /// Dokunmatik ekran: klavyenin tuş temasları sahiplenilir (işaretçi öykünmesi yok), her parmak
+    /// kendi tuşunu izler (iki başparmakla hızlı yazışta basış kaybolmaz). Tutamaçta ya da
+    /// sürükleme/yerleşme sürerken başlayan temas sahiplenilmez: işaretçi öykünmesiyle sürüklenir.
+    pub(super) fn osk_touch(&mut self, cx: &mut Context<Self>, surface: SurfaceId, event: TouchEvent) -> bool {
+        if !self.osk_owns(surface) {
+            return false;
+        }
+        let now = Instant::now();
+        let theme = cx.theme().clone();
+        let Some(open) = &mut self.osk.open else { return false };
+        if event.phase == TouchPhase::Down && (open.drag.is_some() || open.view.on_handle(&theme, event.position)) {
+            return false;
+        }
+        let (repaint, input, arm) = open.view.touch(&event, now);
+        if arm {
+            if let Some(t) = open.hold_timer.take() {
+                cx.cancel_timer(t);
+            }
+            open.hold_timer = Some(cx.set_timer(TOUCH_HOLD));
+        }
+        if repaint {
+            cx.request_frame(surface);
+        }
+        if let Some(input) = input {
+            self.osk_touch_input(cx, event.id, input);
+        }
+        true
+    }
+
+    /// Dokunma bekleme zamanlayıcısı.
+    pub(super) fn osk_timer_fired(&mut self, cx: &mut Context<Self>, id: TimerId) -> bool {
+        let Some(open) = &mut self.osk.open else { return false };
+        if open.hold_timer != Some(id) {
+            return false;
+        }
+        open.hold_timer = None;
+        let surface = open.surface;
+        let held = open.view.touch_hold(Instant::now());
+        for (contact, input) in held {
+            self.osk_touch_input(cx, contact, input);
+        }
+        cx.request_frame(surface);
+        true
+    }
+
+    fn osk_touch_input(&mut self, cx: &mut Context<Self>, contact: TouchId, input: TouchInput) {
+        let (Some(open), Some(osk)) = (&mut self.osk.open, &mut self.osk.osk) else { return };
+        let mut emits = Vec::new();
+        let mut hide = false;
+        match input {
+            TouchInput::Commit(KeyAction::Hide) | TouchInput::Hold(KeyAction::Hide) => hide = true,
+            TouchInput::Commit(action) => {
+                // Bas + bırak; başka parmağın basılı tuttuğu tuşu da bırakır (Osk tek tuş tutar).
+                emits = osk.press(action);
+                emits.extend(osk.release());
+                open.touch_owner = None;
+            }
+            TouchInput::Hold(action) => {
+                emits = osk.press(action);
+                open.touch_owner = Some(contact);
+            }
+            TouchInput::Release if open.touch_owner == Some(contact) => {
+                emits = osk.release();
+                open.touch_owner = None;
+            }
+            TouchInput::Release => {}
+        }
+        apply(cx, &emits);
+        open.view.sync(osk, Instant::now());
+        cx.request_frame(open.surface);
+        if hide {
+            self.osk_hide(cx);
+        }
+        self.osk_publish(cx);
     }
 
     /// Tutamaç sürüklemesi (`global`: çıkış koordinatı). Yüzey her harekette taşınır.

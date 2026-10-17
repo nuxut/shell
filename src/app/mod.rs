@@ -661,6 +661,12 @@ impl App for Shell {
         self.sync_notify_scale();
     }
 
+    fn touch(&mut self, cx: &mut Context<Self>, surface: SurfaceId, event: nuxut::TouchEvent) -> bool {
+        // Ekran klavyesi tuş temaslarını sahiplenir (çoklu dokunma); diğer yüzeylerde ve klavyenin
+        // tutamacında işaretçi öykünmesi.
+        self.osk_touch(cx, surface, event)
+    }
+
     fn pointer(&mut self, cx: &mut Context<Self>, surface: SurfaceId, event: PointerEvent) {
         if self.shot_pointer(cx, surface, event) || self.osk_pointer(cx, surface, event) {
             return;
@@ -793,6 +799,7 @@ impl App for Shell {
             || self.idle_timer_fired(cx, id)
             || self.night_light_timer_fired(cx, id)
             || self.clipboard_timer_fired(cx, id)
+            || self.osk_timer_fired(cx, id)
         {
             return;
         }

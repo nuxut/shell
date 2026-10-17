@@ -19,6 +19,8 @@ pub enum Tool {
     Systemctl,
     Localectl,
     SystemdTmpfiles,
+    // Paket alanı.
+    Pacman,
 }
 
 impl Tool {
@@ -31,6 +33,7 @@ impl Tool {
             Self::Systemctl => "systemctl",
             Self::Localectl => "localectl",
             Self::SystemdTmpfiles => "systemd-tmpfiles",
+            Self::Pacman => "pacman",
         }
     }
 
@@ -42,6 +45,8 @@ impl Tool {
             Self::Mkinitcpio => Duration::from_secs(900),
             Self::GrubScriptCheck | Self::GrubMkfont => Duration::from_secs(60),
             Self::Systemctl | Self::Localectl | Self::SystemdTmpfiles => Duration::from_secs(60),
+            // İndirme yavaş bağlantıda uzun sürebilir.
+            Self::Pacman => Duration::from_secs(1800),
         }
     }
 }
@@ -89,6 +94,23 @@ impl std::fmt::Display for CmdError {
 
 impl std::error::Error for CmdError {}
 
+/// `ETXTBSY` ("Text file busy") yalnız birkaç kez, kısa beklemeyle yeniden denenir: çalıştırılacak
+/// dosya az önce yazıldıysa ve o sırada başka bir thread `fork` ettiyse, çocuk `exec`'e dek yazma
+/// tanıtıcısını tutar ve `exec` geçici olarak reddedilir (testlerde sahte araçlar böyle kararsız
+/// düşüyordu, 2026-10-17; kurulu sistem araçlarında olmaz, denemenin zararı yok).
+fn spawn_retrying(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    let mut tries = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if e.raw_os_error() == Some(26) && tries < 5 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            r => return r,
+        }
+    }
+}
+
 /// Komutu çalıştırır, çıktıyı `Log` olayı olarak akıtır.
 pub fn run(bins: &Bins, tool: Tool, args: &[&str], events: &Events) -> Result<(), CmdError> {
     let mut cmd = Command::new(bins.path(tool));
@@ -103,7 +125,7 @@ pub fn run(bins: &Bins, tool: Tool, args: &[&str], events: &Events) -> Result<()
     for (k, v) in &bins.extra_env {
         cmd.env(k, v);
     }
-    let mut child = cmd.spawn().map_err(|e| CmdError::Spawn(format!("{}: {e}", bins.path(tool))))?;
+    let mut child = spawn_retrying(&mut cmd).map_err(|e| CmdError::Spawn(format!("{}: {e}", bins.path(tool))))?;
     let mut readers = Vec::new();
     for stream in [child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
         let ev = events.clone();

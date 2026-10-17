@@ -82,3 +82,4 @@ crates/nuxut-system-helper/src/boot_theme.rs:* tanı: kök yardımcı olay ve ha
 crates/nuxut-system-helper/src/manifest.rs:* tanı: bildirim dosyası doğrulama hatası (çevrilmez)
 src/services/system_theme.rs:* tanı: system-theme CLI çıktısı (install.sh planı; Ayarlar JSON'daki türleri kendi kataloğundan çevirir)
 src/services/login_screen.rs:* tanı: login-screen CLI çıktısı (install.sh; Hoş geldin --json alanlarını kendi kataloğundan çevirir)
+src/services/root_packages.rs:* tanı: packages CLI çıktısı (Ayarlar --json olaylarını kendi kataloğundan çevirir)

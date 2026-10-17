@@ -306,12 +306,15 @@ impl PanelWidget for NotificationsPanel {
         repaint |= self.scroll.pointer(cx.theme, event, now).repaint;
         // Kartlar yalnızca görünüm içindeki olayları alır (görünüm dışına kaymış kartın eski
         // dikdörtgeni tık yakalamasın); bırakma/ayrılma her zaman (durum temizliği).
-        let in_view = l.viewport.contains(event.position);
-        if in_view || matches!(event.kind, PointerKind::Release(_) | PointerKind::Leave) {
-            let (r, command) = self.cards.pointer(cx.theme, event, now, false);
-            repaint |= r;
-            if let Some(cmd) = command {
-                return (true, Some(Action::Notify(cmd)));
+        // Dokunmada kaydırma görünümü basmayı bekletir; kartlar `forward`'ın verdiklerini alır.
+        for ev in self.scroll.forward(event) {
+            let in_view = l.viewport.contains(ev.position);
+            if in_view || matches!(ev.kind, PointerKind::Release(_) | PointerKind::Leave) {
+                let (r, command) = self.cards.pointer(cx.theme, &ev, now, false);
+                repaint |= r;
+                if let Some(cmd) = command {
+                    return (true, Some(Action::Notify(cmd)));
+                }
             }
         }
 

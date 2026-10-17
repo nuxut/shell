@@ -4,6 +4,14 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::safefs::Root;
 
+/// Sahte araçların yazımı ile çalıştırılması (fork/exec) sıralı: başka bir test thread'i aracı yazarken
+/// fork eden test yazma fd'sini exec'e dek miras alır, exec ETXTBSY ile düşer (yükte aralıklı hata).
+static EXEC: Mutex<()> = Mutex::new(());
+
+fn exec_lock() -> std::sync::MutexGuard<'static, ()> {
+    EXEC.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Geçici kök + sahte systemctl/localectl/systemd-tmpfiles (çağrıları `log`'a yazar; `FAIL`
 /// dosyasındaki alt dizgeyi içeren çağrı başarısız olur).
 struct Sys {
@@ -29,6 +37,7 @@ impl Sys {
         std::fs::create_dir_all(root.join("run")).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
         let uid = rustix::process::getuid().as_raw();
+        let serial = exec_lock();
         for tool in ["systemctl", "localectl", "systemd-tmpfiles"] {
             let body = format!(
                 "#!/bin/sh\nline=\"{tool} $*\"\necho \"$line\" >> '{}'\nif [ -f '{}' ] && echo \"$line\" | grep -qF \"$(cat '{}')\"; then exit 1; fi\n",
@@ -38,6 +47,7 @@ impl Sys {
             );
             write(&bin.join(tool), body, 0o755);
         }
+        drop(serial);
         let s = Self { _t: t, root, bin, log, uid };
         s.file(GREETD_BIN, "x", 0o755);
         for f in REQUIRED {
@@ -78,7 +88,10 @@ impl Sys {
         let bins = Bins::at(self.bin.to_str().unwrap(), vec![]);
         let (events, buf): (Events, Arc<Mutex<Vec<Event>>>) = Events::memory();
         let g = Greeter { ops: &ops, bins: &bins, events: &events, caller: Some(self.uid) };
-        let ok = f(&g);
+        let ok = {
+            let _serial = exec_lock();
+            f(&g)
+        };
         let ev = buf.lock().unwrap().clone();
         (ok, ev)
     }
@@ -115,8 +128,8 @@ fn apply_from_tty_and_revert() {
     });
     assert!(ev.iter().any(|e| matches!(e, Event::LoginScreen { status } if status.active && status.previous.as_deref() == Some("tty"))));
 
-    let (ok, _) = s.run(|g| g.revert());
-    assert!(ok);
+    let (ok, ev) = s.run(|g| g.revert());
+    assert!(ok, "{ev:?}");
     assert_eq!(s.calls(), ["systemctl disable greetd.service"], "tty: hiçbir DM etkinleştirilmez");
     assert!(!s.root.join(GREETD_CONFIG).exists(), "önceden yoktu: Nuxut'unki silinir");
     assert!(!s.root.join("var/lib/nuxut/greeter/state.json").exists());

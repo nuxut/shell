@@ -13,6 +13,7 @@
 //! ```
 //!
 //! `--inspect <ad>`: rol, arayüzler ve Text ile okunabilen metnin uzunluğu (içerik yazılmaz).
+//! `--extents <ad>`: düğümün pencere (yüzey) koordinatında kutusu `x y genişlik yükseklik` (sentetik dokunma hedefi).
 //!
 //! Çıktı satırları: `action <ad>: ok|false|no-actions|yok|hata`, `set-text <ad>: <çağrı sonucu>; içerik YAZILDI|değişmedi`
 //! (adaptörün cevabı değil, alanın yeniden okunan içeriği belirleyicidir).
@@ -37,6 +38,7 @@ fn main() {
             "--click" | "--action" => ops.push(("action", args.next().unwrap_or_default())),
             "--set-text" => ops.push(("set-text", args.next().unwrap_or_default())),
             "--inspect" => ops.push(("inspect", args.next().unwrap_or_default())),
+            "--extents" => ops.push(("extents", args.next().unwrap_or_default())),
             "--wait" => wait = args.next().and_then(|s| s.parse().ok()).unwrap_or(15),
             "--gap" => gap = args.next().and_then(|s| s.parse().ok()).unwrap_or(400),
             _ => app = a,
@@ -120,6 +122,14 @@ fn main() {
                         Err(e) => format!("hata: {e}"),
                     };
                     format!("eylem {n}, DoAction {r}")
+                }
+                "extents" => {
+                    // Pencere (yüzey) koordinatında kutu: x y genişlik yükseklik; canlı dokunma testinin hedefi.
+                    let c = atspi::proxy::component::ComponentProxy::builder(&bus).destination(dest.clone()).unwrap().path(path.clone()).unwrap().build().await.unwrap();
+                    match c.get_extents(atspi::CoordType::Window).await {
+                        Ok((x, y, w, h)) => format!("{x} {y} {w} {h}"),
+                        Err(e) => format!("hata: {e}"),
+                    }
                 }
                 "inspect" => {
                     // Saldırganın göreceği: rol, sunulan arayüzler ve Text üzerinden okunabilen metin.
