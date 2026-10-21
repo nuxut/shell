@@ -113,6 +113,15 @@ aracın ayarı onay beklemeden, yedekli ve tek adımda geri alınabilir biçimde
 3. "Önceki hale dön" / birleşik görünümü kapatma özgün dosyayı (symlink, izin, bağ) geri koyar.
 4. `store` ve başka kullanıcının düz dosyası devralınmaz; root'un dosyasına **bağ** ise bağın
    kendisi kullanıcınındır, devralınır (hedefe dokunulmaz).
+   **Karar yalnız bağa bakar (2026-10-17):** `~/.config` içindeki symlink, hedefinin sahibi,
+   izni ya da konumu ne olursa olsun devralınır (`nuxut_apply::takeable_link`; yalnız nix/guix
+   deposu hariç); Nuxut hedefe asla yazmaz. Gerçek makinede `gtk-4.0/gtk.css` →
+   `/usr/share/themes/Dracula/gtk-4.0/gtk.css` hedefinin sahibi elle kullanıcı yapılmıştı:
+   eski kural hedefi "kullanıcının yazılabilir dosyası" sayıp içinden yazmaya çalışıyor, root'un
+   dizininde `rename` başarısız oluyor, neden `unknown` raporlanıp bağ hiç devralınmıyordu
+   (Nautilus Nuxut renklerini almıyordu). Artık bağlar plan aşamasında devralınır; var olan
+   dosyanın dizini yazılamıyorsa neden `dir_not_writable`. Kullanıcının dotfiles deposuna bağ da
+   aynı kuralla devralınır (birleşik görünümü kapatmak bağı geri kurar).
 5. Kalıcı kayıt `nuxut-apply` snapshot'ıdır (`shell.toml`'a yazılmaz). Ayarlar için
    `msg look status` `last_apply.taken_over`. Ayrıntı: docs/design/look-gtk.md "Devralma".
 

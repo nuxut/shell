@@ -110,9 +110,11 @@ pub trait SystemProbe {
     fn gtk_base(&self, _name: &str, _dir: &Path) -> Option<super::gtk_theme::GtkBase> {
         None
     }
-    /// `path` başka bir temaya/araca bağ (symlink) ve Nuxut onu devralabilir mi (`nuxut-apply`
-    /// `external_reason` + `can_take_over`; ör. root'un tema dosyasına bağ)? Kullanıcının kendi
-    /// yazılabilir dosyasına bağ değildir (oraya yazılır).
+    /// `path` devralınabilir bir bağ (symlink) mı (`nuxut_apply::takeable_link`)? Karar yalnız
+    /// bağın kendisine bakar: hedef root'un tema dosyası, sahibi kullanıcı yapılmış tema dosyası
+    /// ya da kullanıcının dotfiles dosyası olsa da bağ devralınır, hedefe yazılmaz (2026-10-17;
+    /// eskiden kullanıcıya ait hedef "kendi dosyası" sayılıp içinden yazılmaya çalışılıyordu).
+    /// Yalnız nix/guix deposuna bağ devralınmaz.
     fn foreign_link(&self, _path: &Path) -> bool {
         false
     }
@@ -347,8 +349,7 @@ impl SystemProbe for FsProbe {
     }
 
     fn foreign_link(&self, path: &Path) -> bool {
-        std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
-            && nuxut_apply::external_reason(path).is_some_and(|r| r.can_take_over(path))
+        nuxut_apply::takeable_link(path)
     }
 
     fn qt_platform_theme(&self, backend: QtBackend) -> bool {
@@ -551,5 +552,35 @@ pub(crate) mod tests {
         // Hiç Qt yolu yok.
         let none = FakeProbe::default();
         assert_eq!(resolve(&Desktop::default(), Mode::Dark, &none).qt_backend, None);
+    }
+
+    /// Gerçek makinedeki durum (2026-10-17): `gtk.css` bağının hedefi kullanıcıya ait yapılmış ama
+    /// yazılamayan tema dizininde; kardeşin hedefi salt okunur; kullanıcının dotfiles dosyasına
+    /// bağ. Hepsi devralınacak bağdır (karar yalnız bağa bakar); düz dosya ve bağ olmayan yol değil.
+    #[test]
+    fn every_symlink_is_a_takeable_link_whatever_its_target() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let tmp = tempfile::tempdir().unwrap();
+        let theme = tmp.path().join("usr/share/themes/Dracula/gtk-4.0");
+        std::fs::create_dir_all(&theme).unwrap();
+        std::fs::write(theme.join("gtk.css"), "a").unwrap();
+        std::fs::write(theme.join("gtk-dark.css"), "b").unwrap();
+        std::fs::set_permissions(theme.join("gtk-dark.css"), std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::set_permissions(&theme, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let dots = tmp.path().join("dotfiles.css");
+        std::fs::write(&dots, "c").unwrap();
+        let cfg = tmp.path().join("config/gtk-4.0");
+        std::fs::create_dir_all(&cfg).unwrap();
+        symlink(theme.join("gtk.css"), cfg.join("gtk.css")).unwrap();
+        symlink(theme.join("gtk-dark.css"), cfg.join("gtk-dark.css")).unwrap();
+        symlink(&dots, cfg.join("dots.css")).unwrap();
+        std::fs::write(cfg.join("plain.css"), "d").unwrap();
+        let probe = FsProbe::from_env(None, None);
+        for n in ["gtk.css", "gtk-dark.css", "dots.css"] {
+            assert!(probe.foreign_link(&cfg.join(n)), "{n}");
+        }
+        assert!(!probe.foreign_link(&cfg.join("plain.css")));
+        assert!(!probe.foreign_link(&cfg.join("yok.css")));
+        std::fs::set_permissions(&theme, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }

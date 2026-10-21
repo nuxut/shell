@@ -426,6 +426,7 @@ pub fn build(input: &LookInput<'_>, dirs: &Dirs) -> LookPlan {
         mono_font: f.mono_pango.as_deref(),
         text_scaling_factor: &f.text_scaling_factor,
         animations,
+        accent: colors.light.primary,
     }));
 
     // Qt/KDE (§5.3): kdeglobals her iki yolda da (KDE uygulamaları oradan okur).

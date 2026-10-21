@@ -107,6 +107,49 @@ pub fn gvariant_double(x: f64) -> String {
     out
 }
 
+/// GNOME'un adlandırılmış vurgu renkleri (`org.gnome.desktop.interface accent-color`, GNOME ≥ 47)
+/// ve libadwaita'daki karşılıkları.
+const GNOME_ACCENTS: [(&str, u32); 8] = [
+    ("blue", 0x3584e4),
+    ("teal", 0x2190a4),
+    ("green", 0x3a944a),
+    ("yellow", 0xc88800),
+    ("orange", 0xed5b00),
+    ("red", 0xe62d42),
+    ("pink", 0xd56199),
+    ("purple", 0x9141ac),
+];
+
+/// Bu OKLCH kromasının altındaki vurgu renksiz sayılır: `slate`.
+const SLATE_CHROMA: f32 = 0.04;
+
+/// sRGB → OKLab (a, b).
+fn oklab_ab(c: nuxut_core::Color) -> (f32, f32) {
+    let lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    let (r, g, b) = (lin(c.r), lin(c.g), lin(c.b));
+    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    (1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s, 0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s)
+}
+
+/// Nuxut vurgusuna (palet `primary`) OKLCH tonu en yakın GNOME vurgu adı; renksiz vurgu `slate`.
+/// Portal `accent-color`'ı tam rengi verir; bu ad yalnız gsettings okuyan uygulamalar için
+/// (2026-10-17: kullanıcıda 'blue' kalmıştı).
+pub fn gnome_accent(c: nuxut_core::Color) -> &'static str {
+    let (a, b) = oklab_ab(c);
+    if a.hypot(b) < SLATE_CHROMA {
+        return "slate";
+    }
+    let hue = b.atan2(a);
+    let dist = |rgb: u32| {
+        let (ga, gb) = oklab_ab(nuxut_core::Color::from_rgba8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255)); // renk-verisi: GNOME vurgu tablosundaki başvuru rengi (tema rengi değil)
+        let d = (gb.atan2(ga) - hue).rem_euclid(std::f32::consts::TAU);
+        d.min(std::f32::consts::TAU - d)
+    };
+    GNOME_ACCENTS.iter().min_by(|x, y| dist(x.1).total_cmp(&dist(y.1))).map_or("blue", |(name, _)| name)
+}
+
 /// dconf `/org/gnome/desktop/interface/` anahtarları: (anahtar yolu, GVariant metni).
 #[derive(Debug)]
 pub struct DconfInput<'a> {
@@ -120,6 +163,8 @@ pub struct DconfInput<'a> {
     pub mono_font: Option<&'a str>,
     /// `text-scaling-factor` (GVariant `d`; [`super::fonts::Fonts::text_scaling_factor`]).
     pub text_scaling_factor: &'a str,
+    /// Nuxut vurgusu (açık palet `primary`); `accent-color` [`gnome_accent`] ile en yakın ada eşlenir.
+    pub accent: nuxut_core::Color,
     /// `enable-animations` = `!Theme::reduced_motion()`.
     pub animations: bool,
 }
@@ -142,6 +187,7 @@ pub fn dconf(i: &DconfInput<'_>) -> Vec<(String, String)> {
     }
     out.push(("text-scaling-factor", i.text_scaling_factor.to_owned()));
     out.push(("enable-animations", i.animations.to_string()));
+    out.push(("accent-color", gvariant_str(gnome_accent(i.accent))));
     out.into_iter().map(|(k, v)| (format!("{DCONF_DIR}{k}"), v)).collect()
 }
 
@@ -218,11 +264,34 @@ mod tests {
             mono_font: None,
             text_scaling_factor: "1.23",
             animations: false,
+            accent: nuxut_core::Color::from_rgba8(0xff, 0xb4, 0xa5, 255),
         });
         assert_eq!(d[0], ("/org/gnome/desktop/interface/color-scheme".into(), "'prefer-light'".into()));
         assert_eq!(d[4].1, "32");
-        assert_eq!(d.len(), 8);
+        assert_eq!(d.len(), 9);
         assert_eq!(d[6], ("/org/gnome/desktop/interface/text-scaling-factor".into(), "1.23".into()));
         assert_eq!(d[7], ("/org/gnome/desktop/interface/enable-animations".into(), "false".into()));
+        assert_eq!(d[8], ("/org/gnome/desktop/interface/accent-color".into(), "'red'".into()));
+    }
+
+    #[test]
+    fn gnome_accent_names_follow_hue() {
+        let c = |hex: &str| nuxut_core::Color::from_hex(hex).unwrap();
+        for (hex, name) in [
+            ("#3584e4", "blue"),
+            ("#aac7ff", "blue"),
+            ("#2190a4", "teal"),
+            ("#3a944a", "green"),
+            ("#c88800", "yellow"),
+            ("#ed5b00", "orange"),
+            ("#ffb4a5", "red"),
+            ("#d56199", "pink"),
+            ("#9141ac", "purple"),
+            ("#cdb9fb", "purple"),
+            ("#8a8a8a", "slate"),
+            ("#ffffff", "slate"),
+        ] {
+            assert_eq!(gnome_accent(c(hex)), name, "{hex}");
+        }
     }
 }

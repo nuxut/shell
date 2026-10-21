@@ -39,6 +39,10 @@ Kullanıcı: "GTK hiç değişmiyor". Gerçek makinede iki neden:
   eylem `gtk_reload`: dconf `gtk-theme` önce `Nuxut-reload`, hemen sonra `Nuxut` — GTK iki kez
   yeniden yükler, iki görüntü aynı (yanıp sönme yok). Son değer `nuxut-apply`'ın yazdığıyla aynı.
 - `gtk-theme` (dconf) ve `settings.ini gtk-theme-name` = `Nuxut`.
+- dconf `accent-color` (GNOME ≥ 47, adlandırılmış vurgu): açık palet `primary`'nin OKLCH tonuna
+  en yakın GNOME adı (`blue … purple`; kroma < 0.04 → `slate`; `gtk::gnome_accent`). Portal
+  `accent-color` tam rengi verir; ad yalnız gsettings okuyan uygulamalar içindir (2026-10-17:
+  gerçek makinede `'blue'` kalmıştı). Yazım look.mode snapshot'ına girer (yedekli).
 - Kullanıcı `gtk-3.0/gtk.css`'indeki önceki `@import url("nuxut.css")` satırı ve
   `gtk-3.0/nuxut.css` kaldırılır (kalsalar açılışta yüklenip temayı gölgelerdi).
 - Taban tema (adw-gtk3) kurulu değilse ya da CSS'i okunamıyor/`@import` içeriyorsa önceki yol:
@@ -99,15 +103,16 @@ isteğe `Change::take_over(yol)` ekleyip yeniden dener. Özgün biçim (`symlink
 `mode:<sekizli>`, `hardlink`) aynı snapshot'a girer; "önceki hale dön" ve birleşik görünümü
 kapatmak bağı aynı metinle, izni ve sabit bağı geri koyar. Bağın hedefine hiç yazılmaz.
 Devralınamaz: nix/guix deposu (bildirimsel yapılandırma), başka kullanıcının düz dosyası,
-yazılamayan dizin — bunlar yine `last_apply.external` (Ayarlar uyarır, `not_owned` için
-`chown` önerir).
+yazılamayan dizin (`dir_not_writable`) — bunlar yine `last_apply.external` (Ayarlar uyarır;
+kullanıcıya `sudo`/`chown` komutu yazdırılmaz, 2026-10-17).
 
 **Tema bağı olan kullanıcı CSS'i:** Kullanıcının makinesinde `~/.config/gtk-4.0/{gtk.css,
 gtk-dark.css,assets}` → `/usr/share/themes/Dracula/gtk-4.0/…` bağları vardı (Dracula'nın
 libadwaita kurulumu). Bağ devralınıp içerik kopyalansa Dracula'nın tam CSS'i Nuxut renklerini
 ezmeye devam ederdi (kendi sabit renkleri). Bu yüzden `gtk-4.0/gtk.css`, `gtk-4.0/gtk-dark.css`
 ve `gtk-3.0/gtk.css` başka bir temaya devralınabilir bağsa (`SystemProbe::foreign_link`:
-symlink + `external_reason` devralınabilir; kullanıcının kendi yazılabilir dosyasına bağ değil)
+`nuxut_apply::takeable_link`: karar yalnız bağa bakar, hedefin sahibi/izni/konumu fark etmez,
+yalnız nix/guix deposu hariç; 2026-10-17)
 plan o dosyayı Nuxut'un yönetilen dosyası yapar: yalnızca başlık + `@import url("nuxut.css")`
 (GTK3 Nuxut temasıyla yalnızca başlık). `assets` dizin bağına dokunulmaz (artık kimse
 başvurmuyor; kapatınca CSS bağları geri gelince yine işe yarar). Bir sonraki turda dosya düz

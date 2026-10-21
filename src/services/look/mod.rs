@@ -420,7 +420,8 @@ mod tests {
         let mode_change = on_state.plan.changes.iter().find(|c| c.setting == MODE).unwrap();
         let mode_req = writer::to_change(mode_change, false).unwrap();
         assert_eq!(mode_snap.fragments, mode_req.writes.len(), "test örneğinde yalnız dconf düşülür: {mode_snap:?}");
-        assert!(mode_frags - mode_req.writes.len() <= 2, "{mode_frags}");
+        // Düşülen dconf anahtarları: color-scheme, gtk-theme, accent-color.
+        assert!(mode_frags - mode_req.writes.len() <= 3, "{mode_frags}");
 
         // Aynı girdi: hepsi NoOp, yeni snapshot yok, dosya değişmez.
         let before = read(&cfg.join("kdeglobals"));

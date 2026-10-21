@@ -23,16 +23,38 @@ expect_ours() {
         [ "$m" = 644 ] || { echo "HATA ($1): $n izni $m"; fail=1; }
         grep -q 'nuxut.css' "$G/$n" || { echo "HATA ($1): $n nuxut.css içermiyor"; fail=1; }
     done
+    # assets dizin bağına dokunulmaz (docs/design/look-gtk.md).
+    [ "$(readlink "$G/assets")" = "$THEME/assets" ] || { echo "HATA ($1): assets bağı değişti"; fail=1; }
+}
+# Bağın hedefi hiç yazılmamalı (bayt bayt özgün tema dosyası).
+target_intact() {
+    cmp -s "$GTK_TARGET" "$THEME/gtk.css" || { echo "HATA ($1): bağın hedefi değişti"; fail=1; }
 }
 wait_ours() { i=0; while [ $i -lt 40 ]; do if [ -f "$G/gtk.css" ] && [ ! -L "$G/gtk.css" ] && [ ! -L "$G/gtk-dark.css" ]; then return 0; fi; sleep 0.5; i=$((i+1)); done; return 0; }
+if [ "$SCENARIO" = user-target ]; then
+    echo "== look apply (kullanıcıya ait hedef, yazılamayan tema dizini)"
+    unshare --user --map-current-user --pid --fork --mount --mount-proc "$SH" look apply > "$OUT/apply.json" 2> "$OUT/apply.log" || true
+    expect_ours "look apply"
+    target_intact "look apply"
+    if grep -q '"unknown"' "$OUT/apply.json"; then echo "HATA: look apply 'unknown' raporladı"; fail=1; fi
+    accent=$(dconf read /org/gnome/desktop/interface/accent-color)
+    echo "accent-color: $accent"
+    case "$accent" in ''|"'blue'") echo "HATA: accent-color eşlenmedi"; fail=1 ;; esac
+    echo "== bağlar yeniden kuruldu; kabuk açılışı"
+    for n in gtk.css gtk-dark.css; do rm -f "$G/$n"; done
+    ln -s "$GTK_TARGET" "$G/gtk.css"; ln -s "$THEME/gtk-dark.css" "$G/gtk-dark.css"
+fi
 (exec unshare --user --map-current-user --pid --fork --mount --mount-proc "$SH" > "$OUT/shell.log" 2>&1) &
 spid=$!
 wait_ours; sleep 1
 expect_ours "açılış"
+target_intact "açılış"
 echo "== başka bir araç gtk.css'i yeniden bağlıyor"
-rm -f "$G/gtk.css"; ln -s "$THEME/gtk.css" "$G/gtk.css"
+rm -f "$G/gtk.css"; ln -s "$GTK_TARGET" "$G/gtk.css"
 sleep 2; wait_ours; sleep 1
 expect_ours "onarma"
+target_intact "onarma"
+if grep -q 'reason=unknown' "$OUT/shell.log"; then echo "HATA: günlükte reason=unknown"; fail=1; fi
 grim "$OUT/repaired.png"
 echo "== Nautilus"
 (exec nautilus --new-window "$HOME/empty" > "$OUT/nautilus.log" 2>&1) &
