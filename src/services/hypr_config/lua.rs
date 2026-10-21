@@ -12,7 +12,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::generate::{
-    CURVES, GenerateInput, Generated, anim_plan, hypr_color, polkit_start_command, polkit_stop_command, safe_env, safe_exe, session_path_dir, start_command, stop_command,
+    CURVES, GenerateInput, Generated, anim_plan, hypr_color, polkit_start_command, polkit_stop_command, safe_env, safe_exe, session_path_value, start_command, stop_command,
 };
 use super::input::{HyprValue, InputSettings, float_text};
 use super::parse::{ScanLimits, launches_shell, normalize};
@@ -189,12 +189,12 @@ pub fn generate_lua(input: &GenerateInput) -> Generated {
         let _ = writeln!(text, "{INPUT_KEYS_MARKER} {}", input_keys.join(" "));
     }
     text.push_str("\nlocal ok, err = pcall(function()\n");
-    // Kabuğun dizini oturumun PATH'inde (generate::session_path_dir); Lua ortamı canlı okur:
+    // Kabuğun dizini oturumun PATH'inin SONUNDA (generate::session_path_value); Lua ortamı canlı okur:
     // dizin zaten varsa eklenmez (yeniden yüklemede büyümez), `true` = systemd/D-Bus'a da.
-    if let Some(dir) = session_path_dir(&input.shell_exe) {
+    if let Some(dir) = session_path_value(input) {
         let _ = writeln!(
             text,
-            "  local path = os.getenv(\"PATH\") or \"\"\n  if not (\":\" .. path .. \":\"):find({}, 1, true) then hl.env(\"PATH\", {} .. \":\" .. path, true) end",
+            "  local path = os.getenv(\"PATH\") or \"\"\n  if not (\":\" .. path .. \":\"):find({}, 1, true) then hl.env(\"PATH\", path .. \":\" .. {}, true) end",
             lua_str(&format!(":{dir}:")),
             lua_str(dir)
         );
@@ -502,6 +502,7 @@ mod tests {
             displays: None,
             env: Vec::new(),
             input: None,
+            session_path: Some("/home/u/.local/bin".into()),
         }
     }
 
@@ -589,7 +590,7 @@ mod tests {
         // Kabuğun dizini PATH'e yalnızca yoksa (yeniden yüklemede büyümez), systemd/D-Bus'a da.
         assert!(
             g.text.contains(
-                "\n  local path = os.getenv(\"PATH\") or \"\"\n  if not (\":\" .. path .. \":\"):find(\":/home/u/.local/bin:\", 1, true) then hl.env(\"PATH\", \"/home/u/.local/bin\" .. \":\" .. path, true) end\n"
+                "\n  local path = os.getenv(\"PATH\") or \"\"\n  if not (\":\" .. path .. \":\"):find(\":/home/u/.local/bin:\", 1, true) then hl.env(\"PATH\", path .. \":\" .. \"/home/u/.local/bin\", true) end\n"
             ),
             "{}",
             g.text

@@ -97,6 +97,9 @@ pub struct Env {
     pub shell: Option<OsString>,
     pub current_desktop: Option<String>,
     pub proc_root: PathBuf,
+    /// `$XDG_RUNTIME_DIR` ve `$HYPRLAND_INSTANCE_SIGNATURE`: kabuğun oturum PATH işareti için.
+    pub runtime_dir: Option<PathBuf>,
+    pub hypr_signature: Option<String>,
     /// pacman yerel veritabanı (`/var/lib/pacman/local`; yoksa paketler denetlenmez).
     pub pacman_db: PathBuf,
     /// Kaynak dizini (`NUXUT_SRC`, yoksa `~/.local/src/nuxut`): öneri satırları için.
@@ -128,6 +131,8 @@ impl Env {
             shell: std::env::var_os("SHELL"),
             current_desktop: std::env::var("XDG_CURRENT_DESKTOP").ok(),
             proc_root: PathBuf::from("/proc"),
+            runtime_dir: std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
+            hypr_signature: std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok(),
             pacman_db: PathBuf::from("/var/lib/pacman/local"),
             src,
             version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -511,17 +516,6 @@ fn disk_free(path: &Path) -> Option<u64> {
     Some(s.f_bavail.saturating_mul(s.f_frsize))
 }
 
-/// Sürecin başlangıç ortamındaki `PATH` (`/proc/<pid>/environ`; boyut sınırlı). Okunamazsa
-/// (başka kullanıcının süreci, süreç yok) `None`. Değer rapora girmez, yalnız denetlenir.
-fn environ_path(proc_root: &Path, pid: u32) -> Option<OsString> {
-    use std::os::unix::ffi::OsStrExt;
-    let f = std::fs::File::open(proc_root.join(pid.to_string()).join("environ")).ok()?;
-    let mut buf = Vec::new();
-    f.take(MAX_FILE).read_to_end(&mut buf).ok()?;
-    let entry = buf.split(|b| *b == 0).find(|e| e.starts_with(b"PATH="))?;
-    Some(std::ffi::OsStr::from_bytes(&entry[5..]).to_owned())
-}
-
 /// Kullanıcının Hyprland sürecinin PID'i (ortamı okunabilen ilk `Hyprland`).
 fn hyprland_pid(proc_root: &Path) -> Option<u32> {
     let dir = std::fs::read_dir(proc_root).ok()?;
@@ -543,14 +537,20 @@ fn session_path(env: &Env, bin_dir: Option<&Path>, live: &Live, systemd: Option<
         vars.into_iter().take(4096).find_map(|v| v.strip_prefix("PATH=").map(OsString::from))
     });
     let shell = match live {
-        Live::Running(r) => has(environ_path(&env.proc_root, r.pid)),
+        Live::Running(r) => has(crate::self_exe::environ_path(&env.proc_root, r.pid)),
         _ => None,
     };
     SessionPath {
         systemd: has(systemd_path),
-        hyprland: has(hyprland_pid(&env.proc_root).and_then(|pid| environ_path(&env.proc_root, pid))),
+        hyprland: has(hyprland_pid(&env.proc_root).and_then(|pid| crate::self_exe::environ_path(&env.proc_root, pid))),
         shell,
         envd_file: env.config_home.join(ENVD_PATH_FILE).is_file(),
+        applied: env
+            .runtime_dir
+            .as_deref()
+            .zip(env.hypr_signature.as_deref())
+            .and_then(|(r, s)| crate::services::session_path::marker_path(r, s))
+            .is_some_and(|m| m.is_file()),
     }
 }
 

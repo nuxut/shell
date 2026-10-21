@@ -22,7 +22,7 @@ use crate::layout::Edge;
 use crate::schema::SettingSchema;
 use crate::services::audio::AudioBackend;
 use crate::services::hypr_config::input::InputConfig;
-use crate::services::hypr_config::settings::{CompositorConfig, KeybindsConfig, WindowsConfig};
+use crate::services::hypr_config::settings::{CompositorConfig, KeybindOwnerConfig, KeybindsConfig, WindowsConfig};
 use crate::services::notifications::NotificationsConfig;
 use crate::widgets::{WidgetKind, WidgetSettings};
 
@@ -58,6 +58,8 @@ pub struct ShellConfig {
     pub compositor: CompositorConfig,
     pub windows: WindowsConfig,
     pub keybinds: KeybindsConfig,
+    /// `[keybind_owner]`: çakışan tuşta kimin bind'i çalışsın (Ayarlar › Kısayollar).
+    pub keybind_owner: KeybindOwnerConfig,
     /// `[input]`: klavye, fare, dokunmatik yüzey (yalnızca yazılı anahtarlar Hyprland'e gider).
     pub input: InputConfig,
     /// Dosya sürümü (ADR-0002). Göç yüklemeden önce okur ve yazar; burada yalnızca bilinmeyen
@@ -1086,6 +1088,7 @@ impl ShellConfig {
         // --- masaüstü ortaklığı
         self.windows.validate(&mut w);
         self.keybinds.validate(&mut w);
+        self.keybind_owner.validate(&mut w);
         self.input.validate(&mut w);
         self.displays.validate(&mut w);
 

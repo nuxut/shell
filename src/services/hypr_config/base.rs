@@ -361,7 +361,7 @@ pub fn conf_takeover_section(taken: &[(Binding, Vec<Combo>)], shell_exe: &str) -
         if text.is_empty() {
             text.push_str(
                 "\n# Devralınan kısayollar: ayarlarınızdaki aynı tuşlar Nuxut'a geçer (dosyanız değişmez).\n\
-                 # Geri almak: shell.toml [compositor] take_over_keys = false\n",
+                 # Geri almak: Ayarlar › Kısayollar › \"Benimkini koru\" (shell.toml [keybind_owner])\n",
             );
         }
         for l in unbinds.iter().chain(&binds) {
@@ -775,6 +775,7 @@ mod tests {
             displays: None,
             env: Vec::new(),
             input: None,
+            session_path: None,
         };
         std::fs::create_dir_all(dir.join("nuxut")).unwrap();
         let d = dir.display();

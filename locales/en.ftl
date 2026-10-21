@@ -2657,11 +2657,8 @@ shell-doctor-path-ok = { $dir } is on PATH
 # Nerede: Kurulum bölümü. Anlam: ikili dizini PATH'te değil; terminalden "nuxut-shell" adıyla çalışmaz. Değişkenler: $dir.
 shell-doctor-path-missing = { $dir } is not on PATH (commands will not run by name in a terminal)
 
-# Nerede: Öneri satırı. Anlam: PATH'i kalıcı düzelten komut; ardından oturumu yeniden açmak gerekir. Değişkenler: $cmd.
-shell-doctor-hint-fix-path = Run { $cmd }, then log out and back in
-
-# Nerede: Öneri satırı, kullanıcının kabuğu fish ise. Anlam: fish_add_path komutu dizini PATH'e kalıcı ekler; yeni açılan terminallerde hemen geçerli, oturumu kapatmak gerekmez. Değişkenler: $cmd.
-shell-doctor-hint-fix-path-fish = Run { $cmd } (takes effect in new terminals right away)
+# Nerede: Öneri satırı. Anlam: dizin oturumun PATH'inde; bu terminal eklemeden önce açılmış. Yeni terminaller görür, açık olanlar yeniden açılmalı.
+shell-doctor-hint-path-reopen-terminals = Active in newly opened terminals; reopen terminals that are already open
 
 # Nerede: Kurulum bölümü. Anlam: ikili dizini oturum ortamlarında da (systemd kullanıcı yöneticisi, Hyprland, çalışan kabuk) PATH'te; $list bu ortamların adları. Değişkenler: $dir.
 shell-doctor-session-path-ok = { $dir } is on the session PATH too ({ $list })
@@ -2672,11 +2669,14 @@ shell-doctor-session-path-missing = { $dir } is not on the session PATH: { $list
 # Nerede: Kurulum bölümü. Anlam: oturum ortamlarının PATH'i okunamadı (bilgi).
 shell-doctor-session-path-unknown = Could not read the session PATH
 
-# Nerede: Öneri satırı. Anlam: PATH dosyası var ama systemd kullanıcı yöneticisi onu okumadan başlamış; oturumu tamamen kapatıp açmak gerekir.
-shell-doctor-hint-session-path-relogin = Log out completely and back in (environment.d is only read when the session starts)
+# Nerede: Kurulum bölümü. Anlam: kabuk ikili dizinini bu oturumun PATH'ine kendisi ekledi (Hyprland ve systemd ortamı; bilgi). Değişkenler: $dir.
+shell-doctor-session-path-applied = The shell added { $dir } to this session's PATH
 
-# Nerede: Öneri satırı. Anlam: systemd ortamında PATH doğru ama Hyprland ya da kabuk o ortamdan başlamamış; Hyprland'i uwsm ile, kabuğu systemd birimiyle başlatmak gerekir.
-shell-doctor-hint-session-path-hyprland = Start Hyprland with uwsm and the shell with nuxut-shell.service, then log out and back in
+# Nerede: Öneri satırı. Anlam: kabuk çalışıyor ama dizin oturumda yok; kabuk açılışta kendisi ekler, yeniden başlatmak yeter. Komut yazılmaz.
+shell-doctor-hint-session-path-restart = The shell adds the folder to the session PATH when it starts: restart the shell, then reopen open terminals
+
+# Nerede: Öneri satırı. Anlam: kabuk çalışmıyor; açıldığında dizini oturumun PATH'ine kendisi ekler. Komut yazılmaz.
+shell-doctor-hint-session-path-start = The shell adds the folder to the session PATH when it starts; it takes effect in newly opened terminals
 
 # Nerede: Raporda her önerinin başındaki etiket. Anlam: sorunu gideren adım.
 shell-doctor-fix-label = Fix
@@ -2750,14 +2750,35 @@ shell-doctor-hypr-source = Config file { $file }: { $state ->
 # Nerede: Öneri satırı. Anlam: Nuxut kısayol ve ayarlarını Hyprland'e yeniden eklemek.
 shell-doctor-hint-hypr-source = To add it back: nuxut-shell msg hypr add-source
 
-# Nerede: Hyprland bölümü. Anlam: Nuxut kısayollarıyla çakışan kullanıcı kısayolu yok.
-shell-doctor-hypr-conflicts-none = No conflicting shortcuts
+# Nerede: Hyprland bölümü. Anlam: Nuxut kısayollarıyla çözülmemiş çakışma yok (bilerek kullanıcıda kalanlar ayrı satırda).
+shell-doctor-hypr-conflicts-none = No unresolved shortcut conflicts
 
-# Nerede: Hyprland bölümü. Anlam: kaç kısayol çakışıyor ve listesi (tuş, eylem, dosya:satır). Değişkenler: $count, $list.
-shell-doctor-hypr-conflicts = { $count } shortcuts conflict: { $list }
+# Nerede: Hyprland bölümü. Anlam: kaç Nuxut kısayolu kullanıcının bind'i yüzünden devralınamıyor ve listesi (tuş, eylem, dosya:satır: neden). Değişkenler: $count, $list.
+shell-doctor-hypr-conflicts = { $count } shortcuts could not be resolved: { $list }
 
-# Nerede: Öneri satırı. Anlam: çakışan Nuxut kısayolu üretilmez; kullanıcı kendi satırını değiştirebilir ya da Ayarlar'dan tuşu değiştirebilir.
-shell-doctor-hint-conflicts = The conflicting Nuxut shortcut was not created; change your own line or the key in Settings › Shortcuts
+# Nerede: Öneri satırı. Anlam: kullanıcı Ayarlar'da bu kısayol için kendi tuşunu korumayı ya da Nuxut'a başka tuş atamayı seçebilir.
+shell-doctor-hint-conflicts = In Settings › Shortcuts, choose "Keep mine" on these rows or give Nuxut a different key
+
+# Nerede: çakışma nedeni (liste öğesinde). Anlam: kullanıcının bind'i Nuxut'un ayar dosyasından sonra okunuyor, Nuxut onu kaldıramıyor.
+shell-doctor-conflict-read-after = read after Nuxut's line
+
+# Nerede: çakışma nedeni (liste öğesinde). Anlam: Nuxut'un ayar dosyası Hyprland'e yüklenmiyor.
+shell-doctor-conflict-not-loaded = Nuxut's settings file is not loaded
+
+# Nerede: çakışma nedeni (liste öğesinde). Anlam: bind Caps Lock gibi özel bir değiştirici kullanıyor.
+shell-doctor-conflict-special-mods = special modifier (Caps Lock etc.)
+
+# Nerede: çakışma nedeni (liste öğesinde). Anlam: Lua ayarında bind'in hangi dosyada olduğu bilinemiyor.
+shell-doctor-conflict-unlocated = location unknown (Lua config)
+
+# Nerede: Hyprland bölümü, bilgi. Anlam: bu tuşlarda kullanıcının kendi Hyprland kısayolu bilerek geçerli (pencere yönetimi ya da kullanıcının seçimi). Değişkenler: $count, $list.
+shell-doctor-hypr-keys-user = { $count } shortcuts use the key from your Hyprland config (intended): { $list }
+
+# Nerede: Öneri satırı. Anlam: kullanıcı isterse Ayarlar'dan tek tek Nuxut'un kısayoluna geçebilir.
+shell-doctor-hint-keys-user = You can switch them to Nuxut one by one with "Use Nuxut's" in Settings › Shortcuts
+
+# Nerede: Hyprland bölümü, bilgi. Anlam: bu tuşları Nuxut devraldı; kullanıcının dosyası değişmedi. Değişkenler: $count, $list.
+shell-doctor-hypr-keys-taken = Nuxut handles { $count } shortcuts (your file is unchanged): { $list }
 
 # Nerede: Hyprland bölümü. Anlam: kullanıcının Hyprland ayarında hazır tema paketi izi yok. Değişkenler: $file.
 shell-doctor-pack-none = No ready-made theme pack found ({ $file })

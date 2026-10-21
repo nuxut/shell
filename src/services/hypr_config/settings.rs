@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use super::keybinds::{Action, Binding, parse_action_combo};
+use super::keybinds::{Action, Binding, KeyOwner, parse_action_combo};
 use crate::config::sanitize;
 use nuxut::i18n::t;
 use crate::schema::SettingSchema;
@@ -181,6 +181,37 @@ impl KeybindsConfig {
     }
 }
 
+/// `[keybind_owner]`: `eylem = "nuxut"|"user"` — kullanıcının Hyprland ayarında aynı tuş bağlıysa
+/// kimin bind'i çalışsın (Ayarlar › Kısayollar'daki "Nuxut'unkini kullan" / "Benimkini koru";
+/// 2026-10-17). Yazılmayan eylem varsayılanı izler: kabuk eylemleri `take_over_keys`'e göre Nuxut,
+/// temel katman eylemleri kullanıcı (ADR-0006). Bilinmeyen eylem ve değer uyarıyla atılır.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct KeybindOwnerConfig {
+    pub map: BTreeMap<String, String>,
+}
+
+impl KeybindOwnerConfig {
+    pub fn validate(&mut self, w: &mut Vec<String>) {
+        let mut bad = Vec::new();
+        self.map.retain(|k, v| {
+            let ok = Action::from_name(k).is_some() && KeyOwner::from_name(v).is_some();
+            if !ok && bad.len() < 4 {
+                bad.push(format!("{} = \"{}\"", sanitize(k), sanitize(v)));
+            }
+            ok
+        });
+        if !bad.is_empty() {
+            w.push(format!("keybind_owner: geçersiz {} yok sayıldı (eylem = \"nuxut\" | \"user\")", bad.join(", ")));
+        }
+    }
+
+    /// Eylemin açık seçimi.
+    pub fn get(&self, action: Action) -> Option<KeyOwner> {
+        self.map.get(action.name()).and_then(|v| KeyOwner::from_name(v))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +237,21 @@ mod tests {
         let mut d = KeybindsConfig::default();
         d.validate(&mut w2);
         assert!(w2.is_empty() && d == KeybindsConfig::default());
+    }
+
+    #[test]
+    fn keybind_owner_validate() {
+        let mut o = KeybindOwnerConfig::default();
+        for (k, v) in [("close_window", "nuxut"), ("volume_up", "user"), ("nope", "nuxut"), ("emoji", "Nuxut")] {
+            o.map.insert(k.into(), v.into());
+        }
+        let mut w = Vec::new();
+        o.validate(&mut w);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("nope") && w[0].contains("emoji"), "{w:?}");
+        assert_eq!(o.get(Action::CloseWindow), Some(KeyOwner::Nuxut));
+        assert_eq!(o.get(Action::VolumeUp), Some(KeyOwner::User));
+        assert_eq!(o.get(Action::Emoji), None);
     }
 
     #[test]

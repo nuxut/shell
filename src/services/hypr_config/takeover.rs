@@ -531,6 +531,7 @@ fn seed_layer(kind: ConfigKind, shell_exe: &str) -> String {
         displays: None,
         env: Vec::new(),
         input: None,
+        session_path: crate::services::session_path::trusted_bin_dir(),
     };
     match kind {
         ConfigKind::Hyprlang => generate_conf(&input).text,

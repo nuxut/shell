@@ -248,8 +248,9 @@ fn run() -> ExitCode {
     // framework.toml: yalnızca sözdizimi (şeması framework'te); tema run_with içinde okunur.
     heal_reports.extend(nuxut_shell::config_heal::heal_framework(&apply_env, policy == WritePolicy::Disk));
 
-    // Kurulum dizini PATH'te değilse bir kez uyar (kabuk kendi ikililerini mutlak yolla çağırır).
-    nuxut_shell::self_exe::warn_if_not_in_path();
+    // Kurulum dizini bu Hyprland oturumunun PATH'inde değilse asıl örnek IPC ile ekler (ayrı
+    // thread); test örneği yalnız log'a yazar. Kabuk kendi ikililerini mutlak yolla çağırır.
+    nuxut_shell::services::session_path::start(primary && !apply_env.test_instance);
 
     let mut shell = Shell::new(config);
     shell.set_config_load_state(state);

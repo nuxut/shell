@@ -635,6 +635,96 @@ pub fn resolve_settings(table: &BTreeMap<String, String>) -> (Vec<Binding>, Vec<
     (out, warnings)
 }
 
+/// Çakışan tuşta kimin bind'i çalışsın (`shell.toml` `[keybind_owner] <eylem> = "nuxut"|"user"`;
+/// Ayarlar › Kısayollar'daki "Nuxut'unkini kullan" / "Benimkini koru", 2026-10-17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyOwner {
+    Nuxut,
+    User,
+}
+
+impl KeyOwner {
+    pub fn name(self) -> &'static str {
+        match self {
+            KeyOwner::Nuxut => "nuxut",
+            KeyOwner::User => "user",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "nuxut" => Some(KeyOwner::Nuxut),
+            "user" => Some(KeyOwner::User),
+            _ => None,
+        }
+    }
+}
+
+/// Bir eylem için verilen karar: kimin bind'i ve bu karar kullanıcıdan mı geldi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyPref {
+    pub owner: KeyOwner,
+    /// `[keybind_owner]`'da açıkça seçildi ya da `[compositor] take_over_keys = false` (kullanıcının
+    /// genel seçimi). `false`: Nuxut'un varsayılanı (kabuk eylemi → Nuxut, temel katman → kullanıcı).
+    pub chosen: bool,
+}
+
+impl KeyPref {
+    /// Eylemin kararı: açık seçim > `take_over_keys` (yalnızca kabuk eylemleri) > varsayılan.
+    /// Temel katman eylemlerinde varsayılan olarak kullanıcınınki kazanır (ADR-0006).
+    pub fn resolve(action: Action, explicit: Option<KeyOwner>, take_over_keys: bool) -> Self {
+        match explicit {
+            Some(owner) => KeyPref { owner, chosen: true },
+            None if action.is_base() => KeyPref { owner: KeyOwner::User, chosen: false },
+            None if take_over_keys => KeyPref { owner: KeyOwner::Nuxut, chosen: false },
+            None => KeyPref { owner: KeyOwner::User, chosen: true },
+        }
+    }
+}
+
+/// Kullanıcının bind'i neden `unbind` ile devralınamıyor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blocker {
+    /// Nuxut'un ayar katmanından (`nuxut.conf`) SONRA okunuyor: Nuxut'unkini yeniden bağlardı.
+    ReadAfter,
+    /// `nuxut.conf` yüklenmiyor (dahil etme satırı yok/kapalı).
+    NotLoaded,
+    /// CAPS/MOD2… değiştiricisi: `unbind` ile güvenle yazılamıyor.
+    SpecialMods,
+    /// Yeri bilinmiyor (Lua ayarı: bind'ler çalışan Hyprland'den okunur).
+    Unlocated,
+}
+
+/// Çakışmanın nedeni (`msg hypr status` `conflicts[].reason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictReason {
+    /// Temel katman eylemi: kullanıcınınki bilerek kazanır (ADR-0006). Sorun değil, bilgi.
+    UserWins,
+    /// Kullanıcı kendi bind'ini seçti (`[keybind_owner]` ya da `take_over_keys = false`). Bilgi.
+    UserChoice,
+    /// Nuxut'unki isteniyor ama devralınamıyor: tuş hiçbirinde düzgün çalışmayabilir. Uyarı.
+    Blocked(Blocker),
+}
+
+impl ConflictReason {
+    /// `msg hypr status` adı.
+    pub fn name(self) -> &'static str {
+        match self {
+            ConflictReason::UserWins => "user_wins",
+            ConflictReason::UserChoice => "user_choice",
+            ConflictReason::Blocked(Blocker::ReadAfter) => "read_after",
+            ConflictReason::Blocked(Blocker::NotLoaded) => "not_loaded",
+            ConflictReason::Blocked(Blocker::SpecialMods) => "special_mods",
+            ConflictReason::Blocked(Blocker::Unlocated) => "unlocated",
+        }
+    }
+
+    /// Bilinçli karar mı (doctor uyarı değil bilgi gösterir)?
+    pub fn is_intended(self) -> bool {
+        matches!(self, ConflictReason::UserWins | ConflictReason::UserChoice)
+    }
+}
+
 /// Kullanıcının bind'iyle çakıştığı için üretilmeyen Nuxut bind'i.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conflict<L> {
@@ -643,6 +733,9 @@ pub struct Conflict<L> {
     pub combo: Combo,
     /// Kullanıcının bind'inin yeri.
     pub at: L,
+    pub reason: ConflictReason,
+    /// "Nuxut'unkini kullan" seçilirse devralınabilir mi (çakışan her bind'in engeli yok).
+    pub can_take: bool,
 }
 
 /// Kullanıcının zincirindeki bir bind (çakışma girdisi).
@@ -650,14 +743,15 @@ pub struct Conflict<L> {
 pub struct UserKey<L> {
     pub combo: Combo,
     pub at: L,
-    /// Nuxut bu bind'i devralabilir: ayar katmanı ondan SONRA okunuyor ve tuş `unbind` ile
-    /// yazılabiliyor (kararı çağıran verir; bkz. [`Taken`]).
-    pub takeable: bool,
+    /// Nuxut bu bind'i devralamıyorsa nedeni (`None`: ayar katmanından ÖNCE okunuyor ve tuş
+    /// `unbind` ile yazılabiliyor; kararı çağıran verir; bkz. [`Taken`]).
+    pub blocker: Option<Blocker>,
 }
 
 /// Nuxut'un devraldığı kısayol (kullanıcı isteği 2026-10-16, "Nuxut yapabiliyorsa varsayılan
 /// Nuxut"): kullanıcının önceki bind'i ayar katmanında `unbind` ile kaldırılır, ardından Nuxut'unki
-/// bağlanır. Kullanıcının dosyasına dokunulmaz; `[compositor] take_over_keys = false` geri alır.
+/// bağlanır. Kullanıcının dosyasına dokunulmaz; `[keybind_owner] <eylem> = "user"` ya da
+/// `[compositor] take_over_keys = false` geri alır.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Taken<L> {
     pub binding: Binding,
@@ -665,6 +759,8 @@ pub struct Taken<L> {
     pub unbind: Vec<Combo>,
     /// Kullanıcının bind'lerinin yerleri.
     pub at: Vec<L>,
+    /// Açık seçimle mi (`[keybind_owner]`) yoksa varsayılanla mı devralındı.
+    pub chosen: bool,
 }
 
 /// [`split_bindings`] sonucu.
@@ -680,10 +776,9 @@ pub struct Split<L> {
 
 /// Kullanıcının bind'leriyle çakışanları ayırır. Bir eylemin somut bind'lerinden biri bile
 /// çakışırsa eylem bütün olarak ele alınır (rakam ailesi ya da sol/sağ değiştirici yarım kalmaz).
-/// Devralma yalnızca kabuk eylemlerinde (ses, parlaklık, medya, ekran görüntüsü… — Nuxut'un
-/// kendi özellikleri) ve çakışan her kullanıcı bind'i `takeable` ise; temel katman eylemlerinde
-/// kullanıcınınki kazanır (ADR-0006).
-pub fn split_bindings<L: Clone>(bindings: Vec<Binding>, user: &[UserKey<L>]) -> Split<L> {
+/// `pref` eylemin kararını verir ([`KeyPref::resolve`]): Nuxut'unki isteniyor ve çakışan her
+/// kullanıcı bind'inin engeli yoksa devralınır; yoksa kullanıcınınki kalır (neden raporlanır).
+pub fn split_bindings<L: Clone>(bindings: Vec<Binding>, user: &[UserKey<L>], pref: impl Fn(Action) -> KeyPref) -> Split<L> {
     let mut out = Split { keep: Vec::new(), taken: Vec::new(), conflicts: Vec::new() };
     for b in bindings {
         let concrete = b.expand();
@@ -693,18 +788,27 @@ pub fn split_bindings<L: Clone>(bindings: Vec<Binding>, user: &[UserKey<L>]) -> 
             out.keep.push(b);
             continue;
         };
-        if !b.action.is_base() && hits.iter().all(|(_, u)| u.takeable) {
-            let mut unbind: Vec<Combo> = Vec::new();
-            for (_, u) in &hits {
-                if !unbind.contains(&u.combo) {
-                    unbind.push(u.combo.clone());
+        let blocker = hits.iter().find_map(|(_, u)| u.blocker);
+        let p = pref(b.action);
+        let reason = match (p.owner, blocker) {
+            (KeyOwner::Nuxut, None) => {
+                let mut unbind: Vec<Combo> = Vec::new();
+                for (_, u) in &hits {
+                    if !unbind.contains(&u.combo) {
+                        unbind.push(u.combo.clone());
+                    }
                 }
+                let at = hits.iter().map(|(_, u)| u.at.clone()).collect();
+                out.taken.push(Taken { binding: b, unbind, at, chosen: p.chosen });
+                continue;
             }
-            let at = hits.iter().map(|(_, u)| u.at.clone()).collect();
-            out.taken.push(Taken { binding: b, unbind, at });
-        } else {
-            out.conflicts.push(Conflict { action: b.action, combo: first.clone(), at: first_user.at.clone() });
-        }
+            (KeyOwner::Nuxut, Some(x)) => ConflictReason::Blocked(x),
+            (KeyOwner::User, _) if p.chosen => ConflictReason::UserChoice,
+            (KeyOwner::User, _) => ConflictReason::UserWins,
+        };
+        // Engelli bind'in yeri raporlanır (neden onu gösterir); yoksa ilk çakışan.
+        let (combo, at) = hits.iter().find(|(_, u)| u.blocker.is_some()).map_or((first, first_user), |&(c, u)| (c, u));
+        out.conflicts.push(Conflict { action: b.action, combo: combo.clone(), at: at.at.clone(), reason, can_take: blocker.is_none() });
     }
     out
 }
@@ -713,10 +817,10 @@ pub fn split_bindings<L: Clone>(bindings: Vec<Binding>, user: &[UserKey<L>]) -> 
 mod tests {
     use super::*;
 
-    /// Devralmasız ayrım: (üretilecekler, çakışmalar).
+    /// Devralmasız ayrım: (üretilecekler, çakışmalar). Kullanıcınınki seçili.
     fn split_conflicts<L: Clone>(bindings: Vec<Binding>, user: &[(Combo, L)]) -> (Vec<Binding>, Vec<Conflict<L>>) {
-        let user: Vec<UserKey<L>> = user.iter().map(|(combo, at)| UserKey { combo: combo.clone(), at: at.clone(), takeable: false }).collect();
-        let s = split_bindings(bindings, &user);
+        let user: Vec<UserKey<L>> = user.iter().map(|(combo, at)| UserKey { combo: combo.clone(), at: at.clone(), blocker: None }).collect();
+        let s = split_bindings(bindings, &user, |a| KeyPref::resolve(a, None, false));
         assert!(s.taken.is_empty());
         (s.keep, s.conflicts)
     }
@@ -726,22 +830,67 @@ mod tests {
     #[test]
     fn shell_actions_take_over_earlier_user_binds() {
         let (b, _) = resolve_settings(&BTreeMap::new());
-        let key = |m: &str, k: &str, at: usize, takeable: bool| UserKey { combo: parse_hypr_combo(m, k).unwrap(), at, takeable };
+        let key = |m: &str, k: &str, at: usize, blocker: Option<Blocker>| UserKey { combo: parse_hypr_combo(m, k).unwrap(), at, blocker };
         let user = vec![
-            key("", "XF86AudioRaiseVolume", 1, true),
-            key("SUPER", "period", 2, true),
-            key("", "Print", 3, false), // ayar katmanından sonra okunuyor
-            key("SUPER", "q", 4, true), // temel katman eylemi
-            key("", "xf86audioraisevolume", 5, true), // aynı tuş ikinci kez: tek unbind
+            key("", "XF86AudioRaiseVolume", 1, None),
+            key("SUPER", "period", 2, None),
+            key("", "Print", 3, Some(Blocker::ReadAfter)), // ayar katmanından sonra okunuyor
+            key("SUPER", "q", 4, None), // temel katman eylemi
+            key("", "xf86audioraisevolume", 5, None), // aynı tuş ikinci kez: tek unbind
         ];
-        let s = split_bindings(b, &user);
+        let s = split_bindings(b, &user, |a| KeyPref::resolve(a, None, true));
         let names: Vec<_> = s.taken.iter().map(|t| t.binding.action.name()).collect();
         assert_eq!(names, ["volume_up", "emoji"]);
         assert_eq!(s.taken[0].unbind, vec![parse_hypr_combo("", "xf86audioraisevolume").unwrap()]);
         assert_eq!(s.taken[0].at, vec![1, 5]);
-        let dropped: Vec<_> = s.conflicts.iter().map(|c| c.action.name()).collect();
-        assert_eq!(dropped, ["shot_region", "close_window"]);
+        assert!(!s.taken[0].chosen);
+        let dropped: Vec<_> = s.conflicts.iter().map(|c| (c.action.name(), c.reason.name(), c.can_take)).collect();
+        assert_eq!(dropped, [("shot_region", "read_after", false), ("close_window", "user_wins", true)]);
         assert!(s.keep.iter().all(|k| !matches!(k.action, Action::VolumeUp | Action::Emoji | Action::ShotRegion | Action::CloseWindow)));
+    }
+
+    /// Kararın önceliği: açık seçim > `take_over_keys` > varsayılan (kabuk → Nuxut, temel → kullanıcı).
+    #[test]
+    fn key_pref_resolution() {
+        let r = KeyPref::resolve;
+        assert_eq!(r(Action::VolumeUp, None, true), KeyPref { owner: KeyOwner::Nuxut, chosen: false });
+        assert_eq!(r(Action::VolumeUp, None, false), KeyPref { owner: KeyOwner::User, chosen: true });
+        assert_eq!(r(Action::VolumeUp, Some(KeyOwner::Nuxut), false), KeyPref { owner: KeyOwner::Nuxut, chosen: true });
+        assert_eq!(r(Action::CloseWindow, None, true), KeyPref { owner: KeyOwner::User, chosen: false });
+        assert_eq!(r(Action::CloseWindow, Some(KeyOwner::Nuxut), true), KeyPref { owner: KeyOwner::Nuxut, chosen: true });
+        assert_eq!(r(Action::Emoji, Some(KeyOwner::User), true), KeyPref { owner: KeyOwner::User, chosen: true });
+        for o in [KeyOwner::Nuxut, KeyOwner::User] {
+            assert_eq!(KeyOwner::from_name(o.name()), Some(o));
+        }
+        assert_eq!(KeyOwner::from_name("Nuxut"), None);
+    }
+
+    /// Temel katman eylemi açıkça Nuxut'a verilince devralınır; kabuk eylemi kullanıcıya bırakılınca
+    /// bilgi olarak raporlanır. Engel her durumda devralmayı durdurur ve nedeni taşır.
+    #[test]
+    fn explicit_owner_moves_base_and_shell_actions() {
+        let (b, _) = resolve_settings(&BTreeMap::new());
+        let key = |m: &str, k: &str, at: usize, blocker| UserKey { combo: parse_hypr_combo(m, k).unwrap(), at, blocker };
+        let user = vec![
+            key("SUPER", "q", 1, None),
+            key("", "XF86AudioMute", 2, None),
+            key("SUPER", "f", 3, Some(Blocker::ReadAfter)),
+            key("SUPER CAPS", "e", 4, Some(Blocker::SpecialMods)),
+        ];
+        let pref = |a: Action| {
+            let explicit = match a {
+                Action::CloseWindow | Action::Fullscreen => Some(KeyOwner::Nuxut),
+                Action::VolumeMute => Some(KeyOwner::User),
+                _ => None,
+            };
+            KeyPref::resolve(a, explicit, true)
+        };
+        let s = split_bindings(b, &user, pref);
+        assert_eq!(s.taken.iter().map(|t| (t.binding.action.name(), t.chosen)).collect::<Vec<_>>(), [("close_window", true)]);
+        let c: Vec<_> = s.conflicts.iter().map(|c| (c.action.name(), c.reason.name(), c.reason.is_intended(), c.at)).collect();
+        assert_eq!(c, [("volume_mute", "user_choice", true, 2), ("fullscreen", "read_after", false, 3)]);
+        // CAPS'lı bind başka tuş birleşimidir: SUPER+E ile çakışmaz.
+        assert!(s.keep.iter().any(|k| k.action == Action::FileManager));
     }
 
     #[test]
@@ -832,7 +981,7 @@ mod tests {
         let user = vec![(parse_hypr_combo("SUPER", "n").unwrap(), 7usize)];
         let (keep, conflicts) = split_conflicts(b, &user);
         assert!(keep.iter().all(|b| b.action != Action::PanelRight));
-        assert_eq!(conflicts, vec![Conflict { action: Action::PanelRight, combo: parse_setting_combo("SUPER+N").unwrap(), at: 7 }]);
+        assert_eq!(conflicts, vec![Conflict { action: Action::PanelRight, combo: parse_setting_combo("SUPER+N").unwrap(), at: 7, reason: ConflictReason::UserChoice, can_take: true }]);
     }
 
     /// Bütün varsayılanlar birbirinden farklı (hiçbiri çakışma yüzünden düşmez); Hyprland'in örnek

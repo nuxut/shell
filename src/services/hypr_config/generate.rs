@@ -175,6 +175,10 @@ pub struct GenerateInput {
     pub env: Vec<(String, String)>,
     /// Doğrulanmış `[input]` (`sync_input` kapalıysa `None`). Yalnızca yazılı anahtarlar satır üretir.
     pub input: Option<InputSettings>,
+    /// Oturum PATH'inin SONUNA eklenecek güvenilir kurulum dizini
+    /// ([`crate::services::session_path::trusted_bin_dir`]: `<ev>/.local/bin`, sahibi kullanıcı,
+    /// sembolik bağ değil, grup/başkaları yazamaz); yoksa PATH satırı yazılmaz.
+    pub session_path: Option<String>,
 }
 
 /// Ortam çifti üretilen dosyaya güvenle girer mi (ad `[A-Z0-9_]`, değer tek satır, `;`/`#`/`"`/`\`
@@ -208,16 +212,13 @@ pub fn safe_exe(exe: &str) -> &str {
     }
 }
 
-/// Her zaman PATH'te olan dizinler: kabuk buradaysa PATH satırı yazılmaz.
-const SYSTEM_BIN_DIRS: [&str; 5] = ["/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin"];
-
 /// Oturumun PATH'ine eklenecek kabuk dizini (ör. `~/.local/bin`): terminaller, betikler ve
 /// `nuxut-shell msg …` ikiliyi adla bulsun. Kullanıcı isteği 2026-10-16: kabuk başlangıç
 /// dosyalarına (.bash_profile, .profile, fish) yazılmaz, elle adım yok; ayarı Hyprland ortamına
-/// Nuxut'un katmanı koyar. Sistem dizini ya da güvensiz yolda `None`.
-pub fn session_path_dir(exe: &str) -> Option<&str> {
-    let (dir, _) = safe_exe(exe).rsplit_once('/')?;
-    (!dir.is_empty() && !SYSTEM_BIN_DIRS.contains(&dir)).then_some(dir)
+/// Nuxut'un katmanı koyar. Dizin güvenilir kaynaktan gelir ([`GenerateInput::session_path`]) ve
+/// değer yine doğrulanır ([`crate::services::session_path::safe_path_value`]); değilse `None`.
+pub fn session_path_value(input: &GenerateInput) -> Option<&str> {
+    input.session_path.as_deref().filter(|d| crate::services::session_path::safe_path_value(d))
 }
 
 /// Hyprland ortamı her yeniden okumada yeniden kurulur (`handleEnv`, 0.56.2) ve değerdeki `$PATH`
@@ -376,10 +377,10 @@ pub fn generate_conf(input: &GenerateInput) -> Generated {
     );
     let exe = safe_exe(&input.shell_exe);
 
-    if let Some(dir) = session_path_dir(&input.shell_exe) {
+    if let Some(dir) = session_path_value(input) {
         // i18n: tanı üretilen nuxut.conf bölüm yorumu (dosya içeriği)
         text.push_str("\n# Kabuğun dizini oturumun PATH'inde (terminaller, betikler); oturumda bir kez\n");
-        let _ = write!(text, "# hyprlang if !{SESSION_PATH_MARKER}\nenvd = PATH,{dir}:$PATH\nenv = {SESSION_PATH_MARKER},1\n# hyprlang endif\n");
+        let _ = write!(text, "# hyprlang if !{SESSION_PATH_MARKER}\nenvd = PATH,$PATH:{dir}\nenv = {SESSION_PATH_MARKER},1\n# hyprlang endif\n");
     }
 
     let env: Vec<_> = input.env.iter().filter(|(k, v)| safe_env(k, v)).collect();
@@ -497,6 +498,7 @@ mod tests {
             displays: None,
             env: Vec::new(),
             input: None,
+            session_path: Some("/home/u/.local/bin".into()),
         }
     }
 
@@ -553,6 +555,7 @@ mod tests {
             displays: None,
             env: Vec::new(),
             input: None,
+            session_path: None,
         });
         assert!(g.keywords.is_empty());
         assert!(!g.text.contains("exec-once"));
@@ -625,30 +628,31 @@ mod tests {
     fn unsafe_exe_falls_back_to_path() {
         let mut i = input();
         i.shell_exe = "/tmp/x; rm -rf ~ #".into();
+        i.session_path = Some("/tmp/x; rm -rf ~ #".into());
         let g = generate_conf(&i);
         assert!(g.text.contains("|| exec nuxut-shell\n"));
         assert!(!g.text.contains("rm -rf"));
         assert!(!g.text.contains("envd = PATH"), "güvensiz yolda PATH satırı yok");
     }
 
-    /// Kabuğun dizini oturumun PATH'ine: oturumda bir kez (yeniden yüklemede büyümez), systemd'ye de
-    /// (`envd`); sistem dizininde satır yok.
+    /// Kabuğun dizini oturumun PATH'inin SONUNA: oturumda bir kez (yeniden yüklemede büyümez),
+    /// systemd'ye de (`envd`); güvenilir dizin yoksa ya da değer güvensizse satır yok.
     #[test]
     fn session_path_block_once_per_session() {
         let g = generate_conf(&input());
         assert!(
             g.text.contains(
-                "\n# hyprlang if !NUXUT_PATH_ADDED\nenvd = PATH,/home/u/.local/bin:$PATH\nenv = NUXUT_PATH_ADDED,1\n# hyprlang endif\n"
+                "\n# hyprlang if !NUXUT_PATH_ADDED\nenvd = PATH,$PATH:/home/u/.local/bin\nenv = NUXUT_PATH_ADDED,1\n# hyprlang endif\n"
             ),
             "{}",
             g.text
         );
         assert!(g.keywords.iter().all(|(k, _)| k != "env" && k != "envd"), "canlı batch'e girmez");
-        assert_eq!(session_path_dir("/usr/bin/nuxut-shell"), None);
-        assert_eq!(session_path_dir("nuxut-shell"), None);
-        assert_eq!(session_path_dir("/opt/nuxut/bin/nuxut-shell"), Some("/opt/nuxut/bin"));
-        let g = generate_conf(&GenerateInput { shell_exe: "/usr/bin/nuxut-shell".into(), ..input() });
-        assert!(!g.text.contains("envd = PATH"));
+        for bad in [None, Some("/usr/bin"), Some("/a,b"), Some("/a$PATH"), Some("/a\nexec-once = x"), Some("/a:/b"), Some("rel")] {
+            let g = generate_conf(&GenerateInput { session_path: bad.map(str::to_owned), ..input() });
+            assert!(!g.text.contains("envd = PATH"), "{bad:?}");
+            assert!(!g.text.contains(SESSION_PATH_MARKER), "{bad:?}");
+        }
     }
 
     #[test]

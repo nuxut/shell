@@ -3,9 +3,10 @@
 //! Kabuk kendi ikililerini (bind'ler, oturum kancası, kilit, Ayarlar) `current_exe()` mutlak yoluyla
 //! çağırır; PATH'e güvenmez. Terminalden `nuxut-shell msg …` ve adla arayan betikler için kurulum
 //! dizinini oturumun PATH'ine Nuxut'un Hyprland katmanı koyar (`nuxut.conf`/`nuxut.lua`,
-//! [`crate::services::hypr_config::generate::session_path_dir`]; kullanıcı isteği 2026-10-16: kabuk
-//! başlangıç dosyalarına yazılmaz, elle adım yok). Dizin bu sürecin PATH'inde yoksa bir kez
-//! bilgi log'u yazılır.
+//! [`crate::services::hypr_config::generate::session_path_value`]; kullanıcı isteği 2026-10-16: kabuk
+//! başlangıç dosyalarına yazılmaz, elle adım yok). Katman bu oturumda yüklenmemişse kabuk açılışta
+//! dizini çalışan Hyprland'e IPC ile ekler ([`crate::services::session_path`], 2026-10-17); test
+//! örneğinde dizin bu sürecin PATH'inde yoksa yalnız bilgi log'u yazılır.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -27,6 +28,21 @@ pub fn dir_in_path(dir: &Path, path: Option<&OsStr>) -> bool {
     })
 }
 
+/// `/proc/<pid>/environ` okuma sınırı.
+const MAX_ENVIRON: u64 = 1 << 20;
+
+/// Sürecin başlangıç ortamındaki `PATH` (`/proc/<pid>/environ`; boyut sınırlı). Okunamazsa
+/// (başka kullanıcının süreci, süreç yok) `None`. Sonradan `setenv` ile eklenen değer burada
+/// görünmez.
+pub fn environ_path(proc_root: &Path, pid: u32) -> Option<std::ffi::OsString> {
+    use std::io::Read;
+    use std::os::unix::ffi::OsStrExt;
+    let f = std::fs::File::open(proc_root.join(pid.to_string()).join("environ")).ok()?;
+    let mut buf = Vec::new();
+    f.take(MAX_ENVIRON).read_to_end(&mut buf).ok()?;
+    let entry = buf.split(|b| *b == 0).find(|e| e.starts_with(b"PATH="))?;
+    Some(OsStr::from_bytes(&entry[5..]).to_owned())
+}
 /// Kurulum dizini PATH'te değilse bir kez bilgi log'u yazar. Çözüm uygulanmıştır (Hyprland katmanı);
 /// eksikse nedeni ilk kurulumdan sonraki ilk oturum ya da katmanın yüklenmemesidir.
 pub fn warn_if_not_in_path() {

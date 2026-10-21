@@ -195,6 +195,7 @@ impl Shell {
             motion: Some(MotionGroup::from_theme(theme)),
             windows: Some(WindowsGroup::from_theme(theme, w.gap_inner, w.gap_outer, w.border)),
             keybinds: c.compositor.sync_keybinds.then(|| c.keybinds.map.clone()),
+            key_owner: c.keybind_owner.clone(),
             hide_defaults: c.wallpaper.draws_any(),
             shell_exe: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
             session_env: crate::services::portal_env::from_process(),

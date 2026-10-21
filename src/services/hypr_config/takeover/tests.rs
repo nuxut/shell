@@ -116,6 +116,7 @@ fn request() -> SyncRequest {
         motion: Some(MotionGroup::from_theme(&theme)),
         windows: Some(WindowsGroup::from_theme(&theme, 4, 8, 2)),
         keybinds: Some(KeybindsConfig::default().map),
+        key_owner: Default::default(),
         hide_defaults: true,
         shell_exe: "/usr/bin/nuxut-shell".into(),
         session_env: Vec::new(),

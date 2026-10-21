@@ -41,6 +41,7 @@ pub mod removable_media;
 pub mod safe_file;
 pub mod screenshot;
 pub mod session;
+pub mod session_path;
 pub mod setup;
 pub mod sharepicker;
 pub mod shell_state;

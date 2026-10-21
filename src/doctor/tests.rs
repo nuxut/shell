@@ -115,7 +115,7 @@ fn install_path_and_binaries() {
     let r = evaluate(&f);
     let path = find(&r, "install", "path");
     assert_eq!(path.level, Level::Warn);
-    assert_eq!(path.hint.as_deref(), Some("sh ~/.local/src/nuxut/shell/install.sh --fix-path çalıştırın, sonra oturumu kapatıp açın"));
+    assert!(path.hint.as_deref().unwrap().starts_with("Kabuk açılışta dizini"), "{:?}", path.hint);
     assert_eq!(find(&r, "install", "binaries").level, Level::Fail);
     assert!(find(&r, "install", "binaries").text.contains("nuxut-settings"));
     assert_eq!(find(&r, "install", "helpers").level, Level::Fail, "seçici kurulumun zorunlu saydığı ikili");
@@ -125,7 +125,7 @@ fn install_path_and_binaries() {
 }
 
 #[test]
-fn path_is_first_line_and_hint_follows_login_shell() {
+fn path_is_first_line_and_hint_never_prints_a_command() {
     crate::i18n::use_turkish_for_tests();
     let mut f = healthy();
     f.install.in_path = false;
@@ -136,11 +136,22 @@ fn path_is_first_line_and_hint_follows_login_shell() {
     let first = r.render().lines().find(|l| l.starts_with("  ")).unwrap().to_owned();
     assert!(first.contains("⚠") && first.contains("PATH"), "{first}");
     let path = find(&r, "install", "path");
-    assert_eq!(path.hint.as_deref(), Some("fish_add_path ~/.local/bin çalıştırın (yeni terminallerde hemen geçerli)"));
+    // Kabuk çalışıyor, oturumda yok: kabuk açılışta ekler (komut değil; 2026-10-17).
+    assert!(path.hint.as_deref().unwrap().starts_with("Kabuk açılışta dizini"), "{:?}", path.hint);
     assert_eq!(path.data["shell"], "fish");
-    f.install.login_shell = LoginShell::Bash;
+    // Kabuk bu oturuma ekledi: yalnız bu terminal eski.
+    f.install.session_path.applied = true;
     let path = find(&evaluate(&f), "install", "path").clone();
-    assert!(path.hint.unwrap().starts_with("sh ~/.local/src/nuxut/shell/install.sh --fix-path"));
+    assert_eq!(path.hint.as_deref(), Some("Yeni açılan terminallerde etkin; açık terminalleri yeniden açın"));
+    // Oturum ortamları zaten görüyor: aynı öneri.
+    f.install.session_path = SessionPath { systemd: Some(true), hyprland: Some(true), shell: None, envd_file: false, applied: false };
+    let path = find(&evaluate(&f), "install", "path").clone();
+    assert_eq!(path.hint.as_deref(), Some("Yeni açılan terminallerde etkin; açık terminalleri yeniden açın"));
+    // Kabuk çalışmıyor ve oturumda yok.
+    f.install.session_path = SessionPath::default();
+    f.live = Live::NotRunning;
+    let path = find(&evaluate(&f), "install", "path").clone();
+    assert!(path.hint.as_deref().unwrap().starts_with("Kabuk açıldığında dizini"), "{:?}", path.hint);
 }
 
 #[test]
@@ -203,6 +214,42 @@ fn hyprland_source_conflicts_and_packs() {
     assert_eq!(p.data["packs"], json!(["end4"]), "aynı paket tek kez");
     running(&mut f).hypr = Some(json!({"source": "error", "conflicts": []}));
     assert_eq!(find(&evaluate(&f), "hyprland", "source").level, Level::Fail);
+}
+
+/// end4 düzeni (2026-10-17): kullanıcınınki bilerek kazanan pencere kısayolları ⚠ değil ℹ;
+/// devralınamayan kısayol nedeniyle ⚠; devralınanlar ℹ.
+#[test]
+fn intended_key_conflicts_are_info_and_blocked_ones_say_why() {
+    crate::i18n::use_turkish_for_tests();
+    let mut f = healthy();
+    let k = "/home/u/.config/hypr/hyprland/keybinds.conf";
+    running(&mut f).hypr = Some(json!({
+        "source": "present",
+        "config": "/home/u/.config/hypr/hyprland.conf",
+        "conflicts": [
+            {"action": "close_window", "combo": "SUPER+q", "file": k, "line": 40, "reason": "user_wins", "can_take": true},
+            {"action": "volume_mute", "combo": "xf86audiomute", "file": k, "line": 9, "reason": "user_choice", "can_take": true}
+        ],
+        "taken_over": [{"action": "volume_up", "combo": "xf86audioraisevolume", "file": k, "line": 7, "reason": "default", "can_take": true}]
+    }));
+    let r = evaluate(&f);
+    assert_eq!(find(&r, "hyprland", "conflicts").level, Level::Ok);
+    let u = find(&r, "hyprland", "keys_user");
+    assert_eq!(u.level, Level::Info);
+    assert!(u.text.contains("2 kısayolda") && u.text.contains("SUPER+q close_window (~/.config/hypr/hyprland/keybinds.conf:40)"), "{}", u.text);
+    assert!(u.hint.as_deref().unwrap().contains("Nuxut'unkini kullan"));
+    assert_eq!(find(&r, "hyprland", "keys_taken").level, Level::Info);
+    assert!(!r.sections.iter().flat_map(|s| &s.checks).any(|c| c.level == Level::Warn && c.id == "conflicts"));
+
+    running(&mut f).hypr.as_mut().unwrap()["conflicts"] = json!([
+        {"action": "clipboard", "combo": "SUPER+SHIFT+v", "file": "/home/u/.config/hypr/custom/late.conf", "line": 1, "reason": "read_after", "can_take": false}
+    ]);
+    let r = evaluate(&f);
+    let c = find(&r, "hyprland", "conflicts");
+    assert_eq!(c.level, Level::Warn);
+    assert!(c.text.contains("SUPER+SHIFT+v clipboard (~/.config/hypr/custom/late.conf:1: Nuxut'un satırından sonra okunuyor)"), "{}", c.text);
+    let hint = c.hint.as_deref().unwrap();
+    assert!(hint.contains("Benimkini koru") && !hint.contains("nuxut-shell"), "komut yazdırılmaz: {hint}");
 }
 
 #[test]
@@ -330,6 +377,8 @@ fn fake() -> Fake {
         shell: Some("/usr/bin/fish".into()),
         current_desktop: Some("Nuxut:Hyprland".into()),
         proc_root: dir.path().join("proc"),
+        runtime_dir: Some(dir.path().join("run")),
+        hypr_signature: Some("sig_1".into()),
         pacman_db: dir.path().join("pacman"),
         src: home.join(".local/src/nuxut"),
         version: "0.1.0".into(),
@@ -555,8 +604,13 @@ fn gather_session_path_reads_effective_environments() {
     let facts = run_gather_with(&f.env, LiveReply::Text(text), SessionRes::ByPid, &[], &systemd);
     assert_eq!(
         facts.install.session_path,
-        SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(true), envd_file: true }
+        SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(true), envd_file: true, applied: false }
     );
+    // Kabuğun bu Hyprland örneği için yazdığı işaret: eklendi.
+    let marker = crate::services::session_path::marker_path(f.env.runtime_dir.as_deref().unwrap(), "sig_1").unwrap();
+    write(&marker, "1\n");
+    let facts = run_gather_with(&f.env, LiveReply::NotRunning, SessionRes::ByPid, &[], &systemd);
+    assert!(facts.install.session_path.applied);
     // Hiçbiri okunamazsa bilinmiyor; dosya yok.
     let g = fake();
     let facts = run_gather(&g.env, LiveReply::NotRunning, SessionRes::ByPid, &[]);
@@ -573,21 +627,31 @@ fn session_path_check_and_fix_lines() {
     };
     let unknown = with(&mut f, SessionPath::default());
     assert_eq!(unknown.level, Level::Info);
-    let ok = with(&mut f, SessionPath { systemd: Some(true), hyprland: Some(true), shell: None, envd_file: true });
+    let ok = with(&mut f, SessionPath { systemd: Some(true), hyprland: Some(true), shell: None, envd_file: true, applied: false });
     assert_eq!(ok.level, Level::Ok);
     assert!(ok.text.contains("systemd, Hyprland"), "{}", ok.text);
-    // Gerçek makine durumu: dosya var, ortamlar görmüyor → yeniden giriş.
-    let relogin = with(&mut f, SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(false), envd_file: true });
-    assert_eq!(relogin.level, Level::Warn);
-    assert!(relogin.text.contains("systemd, Hyprland, nuxut-shell"), "{}", relogin.text);
-    assert!(relogin.hint.as_deref().unwrap().starts_with("Oturumu tamamen kapatıp açın"));
-    let no_file = with(&mut f, SessionPath { systemd: Some(false), hyprland: None, shell: None, envd_file: false });
-    assert!(no_file.hint.as_deref().unwrap().contains("install.sh --fix-path"));
-    let hypr = with(&mut f, SessionPath { systemd: Some(true), hyprland: Some(false), shell: None, envd_file: true });
-    assert!(hypr.hint.as_deref().unwrap().contains("uwsm"));
-    // Raporda her öneri "Çözüm:" satırıdır.
+    // Gerçek makine durumu: ortamlar görmüyor, kabuk çalışıyor → kabuk açılışta kendisi ekler.
+    let missing = with(&mut f, SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(false), envd_file: true, applied: false });
+    assert_eq!(missing.level, Level::Warn);
+    assert!(missing.text.contains("systemd, Hyprland, nuxut-shell"), "{}", missing.text);
+    assert!(missing.hint.as_deref().unwrap().starts_with("Kabuk açılışta dizini oturumun PATH'ine kendisi ekler: kabuğu yeniden başlatın"));
+    // Kabuk ekledi: /proc başlangıç ortamı eski olsa da uyarı yok, açık terminaller söylenir.
+    let applied = with(&mut f, SessionPath { systemd: Some(true), hyprland: Some(false), shell: Some(false), envd_file: false, applied: true });
+    assert_eq!(applied.level, Level::Info);
+    assert_eq!(applied.text, "Kabuk ~/.local/bin dizinini bu oturumun PATH'ine ekledi");
+    assert_eq!(applied.hint.as_deref(), Some("Yeni açılan terminallerde etkin; açık terminalleri yeniden açın"));
+    assert_eq!(applied.data["applied"], true);
+    // Kabuk çalışmıyor.
+    f.live = Live::NotRunning;
+    let stopped = with(&mut f, SessionPath { systemd: Some(false), hyprland: None, shell: None, envd_file: false, applied: false });
+    assert!(stopped.hint.as_deref().unwrap().starts_with("Kabuk açıldığında dizini"));
+    // Raporda her öneri "Çözüm:" satırıdır; hiçbir öneri komut ya da kurulum betiği yazdırmaz.
     let render = evaluate(&f).render();
-    assert!(render.contains("      Çözüm: Hyprland'i uwsm ile"), "{render}");
+    assert!(render.contains("      Çözüm: Kabuk açıldığında dizini"), "{render}");
+    for c in [&missing, &applied, &stopped] {
+        let hint = c.hint.as_deref().unwrap();
+        assert!(!hint.contains("install.sh") && !hint.contains("fish_add_path") && !hint.contains("hyprctl"), "{hint}");
+    }
 }
 
 #[test]
@@ -598,7 +662,7 @@ fn every_problem_has_a_fix_line() {
     f.install.missing_bins = vec!["nuxut-settings"];
     f.lock.binary_ok = false;
     f.portal.portals_conf = ConfState::Managed { file_chooser_nuxut: false };
-    f.install.session_path = SessionPath { systemd: Some(false), hyprland: None, shell: None, envd_file: true };
+    f.install.session_path = SessionPath { systemd: Some(false), hyprland: None, shell: None, envd_file: true, applied: false };
     f.clip_tools = vec![
         ClipTool { tool: "hypr-bridge", kind: ClipKind::Bridge, at: None },
         ClipTool { tool: "copyq", kind: ClipKind::Manager, at: None },
@@ -784,7 +848,7 @@ fn never_suggests_sudo_or_chown() {
     f.install.in_path = false;
     f.install.missing_bins = vec!["nuxut-lock"];
     f.install.missing_helpers = vec!["nuxut-filechooser"];
-    f.install.session_path = SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(false), envd_file: false };
+    f.install.session_path = SessionPath { systemd: Some(false), hyprland: Some(false), shell: Some(false), envd_file: false, applied: false };
     f.lock.binary_ok = false;
     f.lock.listen_logind = false;
     f.portal.portals_conf = ConfState::Managed { file_chooser_nuxut: false };

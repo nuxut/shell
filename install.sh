@@ -476,24 +476,30 @@ in_path() { # in_path DİZİN PATH-DEĞERİ
     case ":$2:" in *":$1:"*|*":$1/:"*) return 0 ;; *) return 1 ;; esac
 }
 
-envd_line() { # environment.d satırı; $BIN güvenli değilse boş (ve 1 döner)
-    if [ "$BIN" = "$HOME/.local/bin" ]; then
-        # shellcheck disable=SC2016 # environment.d genişletir, kabuk değil
-        printf '%s\n' 'PATH=$HOME/.local/bin:${PATH}'
-        return 0
-    fi
-    case $BIN in
-        /*) ;;
-        *) return 1 ;;
-    esac
-    # environment.d '$', '\', tırnak ve boşluğu özel yorumlar; yalnızca yalın yollar yazılır.
+# $BIN oturum PATH'ine (Hyprland keyword/eval, environment.d) girebilir mi? Güvenlik incelemesi
+# 2026-10-17 (güvenilmeyen arama yolu): yalnız yalın mutlak yol (virgül, '$', ':', boşluk, tırnak,
+# satır sonu yok; '.'/'..' bileşeni yok — keyword/eval enjeksiyonu olmaz), sistem dizini değil;
+# dizin sembolik bağ değil, sahibi kullanıcı, grup/başkaları yazamaz; üst dizinleri kullanıcıya
+# ya da root'a ait ve grup/başkaları yazamaz. Geçmezse PATH'e hiçbir şey eklenmez. Dizin her
+# zaman PATH'in SONUNA eklenir: nuxut-* adları benzersiz, sistem komutları önce bulunur.
+bin_path_safe() {
+    case $BIN in /*) ;; *) return 1 ;; esac
     case $BIN in *[!A-Za-z0-9/._+-]*) return 1 ;; esac
+    case /$BIN/ in */./*|*/../*) return 1 ;; esac
+    case $BIN in /usr/bin|/bin|/usr/local/bin|/usr/sbin|/sbin) return 1 ;; esac
+    [ "${#BIN}" -le 512 ] || return 1
+    dir_private "$BIN" && path_trusted "$(dirname "$BIN")"
+}
+
+envd_line() { # environment.d satırı (dizin sonda); $BIN güvenli değilse boş (ve 1 döner)
+    bin_path_safe || return 1
+    # environment.d '$', '\', tırnak ve boşluğu özel yorumlar; bin_path_safe yalın yol garanti eder.
     # shellcheck disable=SC2016
-    printf 'PATH=%s:${PATH}\n' "$BIN"
+    printf 'PATH=${PATH}:%s\n' "$BIN"
 }
 
 write_envd() {
-    line=$(envd_line) || { warn "$BIN özel karakter içeriyor; environment.d satırını elle yazın."; return 1; }
+    line=$(envd_line) || { warn "$BIN güvenilir değil (sahiplik, izin ya da özel karakter); PATH'e eklenmedi."; return 1; }
     if [ "$DRY_RUN" = 1 ]; then
         note "[deneme] yazılmadı: $ENVD_FILE ← $line"
         return 0
@@ -513,18 +519,18 @@ write_envd() {
 # envd/üçüncü argüman systemd + D-Bus etkinleştirme ortamına da aktarır). Lua ayarında `hyprctl
 # eval` (Hyprland'in kendi PATH'i okunur, varsa eklenmez), hyprlang'da `hyprctl keyword envd`
 # ($PATH Hyprland'in ortamından açılır). Yalnız Hyprland IPC; dosya yazılmaz. Hyprland'in
-# başlattığı yeni süreçler hemen alır, açık terminaller almaz.
+# başlattığı yeni süreçler hemen alır, açık terminaller almaz. Dizin PATH'in SONUNA ve yalnız
+# bin_path_safe geçerse eklenir (güvenlik incelemesi 2026-10-17).
 hypr_path_live() {
     [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v hyprctl >/dev/null 2>&1 || return 1
-    # Lua dizgesine ve hyprlang değerine yalnız yalın yol girer.
-    case $BIN in /*) ;; *) return 1 ;; esac
-    case $BIN in *[!A-Za-z0-9/._+-]*) return 1 ;; esac
-    lua="local p = os.getenv(\"PATH\") or \"\"; if not (\":\" .. p .. \":\"):find(\":$BIN:\", 1, true) then hl.env(\"PATH\", \"$BIN:\" .. p, true) end"
+    # Lua dizgesine ve hyprlang değerine yalnız güvenilir, yalın yol girer.
+    bin_path_safe || return 1
+    lua="local p = os.getenv(\"PATH\") or \"\"; if not (\":\" .. p .. \":\"):find(\":$BIN:\", 1, true) then hl.env(\"PATH\", p .. \":$BIN\", true) end"
     out=$(hyprctl eval "$lua" 2>&1) || return 1
     case $out in
         *"only supported with the lua"*)
             # shellcheck disable=SC2016 # $PATH'i Hyprland açar
-            out=$(hyprctl keyword envd "PATH,$BIN:\$PATH" 2>&1) || return 1 ;;
+            out=$(hyprctl keyword envd "PATH,\$PATH:$BIN" 2>&1) || return 1 ;;
     esac
     [ "$out" = ok ]
 }
@@ -533,7 +539,7 @@ path_check() {
     # Etkin PATH denetlenir (dosyanın varlığı değil): environment.d yalnızca systemd kullanıcı
     # yöneticisini besler; tty → bash → start-hyprland yolunda Hyprland'in ortamına girmez.
     # Kalıcı çözüm Nuxut'un Hyprland katmanında (nuxut.conf/nuxut.lua: oturumda bir kez
-    # `envd = PATH,<dizin>:$PATH`, systemd'ye de aktarılır). Kullanıcı isteği 2026-10-16: kabuk
+    # `envd = PATH,$PATH:<dizin>`, systemd'ye de aktarılır). Kullanıcı isteği 2026-10-16: kabuk
     # başlangıç dosyalarına (.bash_profile, .profile, fish) yazılmaz, elle adım istenmez.
     # NUXUT_SESSION_PATH testler için systemd ortamının yerine geçer.
     if [ -n "${NUXUT_SESSION_PATH+x}" ]; then
@@ -551,6 +557,10 @@ path_check() {
     fi
     if in_path "$BIN" "$PATH"; then
         note "$BIN bu terminalin PATH'inde."
+        return 0
+    fi
+    if ! bin_path_safe; then
+        warn "$BIN oturumun PATH'ine eklenmedi: güvenilir değil (sembolik bağ, başka sahip, grup/başkaları yazabiliyor ya da özel karakter)."
         return 0
     fi
     # Çalışan Hyprland oturumuna hemen eklenir (yeniden giriş beklenmez); kalıcı olanı Nuxut'un

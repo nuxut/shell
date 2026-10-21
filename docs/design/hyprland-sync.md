@@ -225,7 +225,7 @@ ayrıştırılır.
   satırın yanında "Bu kısayol Hyprland ayarlarınızda kullanılıyor (dosya:satır)" gösterir.
   Kullanıcının dosyası hiç değişmez. İstisna (2026-10-16): kabuk eylemleri ayar katmanından önce
   okunan bind'i `nuxut.conf`'ta `unbind` ile devralır (`[compositor] take_over_keys`;
-  `docs/design/hyprland-base.md` §3.4).
+  `docs/design/hyprland-base.md` §3.4); kısayol başına seçim `[keybind_owner]` ve çakışma nedenleri §3.5.
 
 ## 6. Arayüz sözleşmesi (Ayarlar uygulaması için)
 

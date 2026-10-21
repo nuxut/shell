@@ -34,10 +34,10 @@ use super::ensure::{
 };
 use super::generate::{GenerateInput, Generated, LookGroup, MANAGED_KEYS, MotionGroup, WindowsGroup, generate_conf};
 use super::input::InputSettings;
-use super::keybinds::{Combo, MOD_ALT, MOD_CTRL, MOD_OTHER, MOD_SHIFT, MOD_SUPER, UserKey, resolve_settings, split_bindings};
+use super::keybinds::{Blocker, Combo, KeyPref, MOD_ALT, MOD_CTRL, MOD_OTHER, MOD_SHIFT, MOD_SUPER, UserKey, resolve_settings, split_bindings};
 use super::lua::{INCLUDE_LINE, generate_lua, scan_lua};
 use super::parse::{ChainReport, Location, ScanInput, ScanLimits, scan_chain};
-use super::settings::CompositorConfig;
+use super::settings::{CompositorConfig, KeybindOwnerConfig};
 use crate::services::apply::{self as ext, HYPR_SOURCE};
 
 /// Üretilen dosya üst sınırı (okuma).
@@ -320,6 +320,8 @@ pub struct SyncRequest {
     pub windows: Option<WindowsGroup>,
     /// Doğrulanmış `[keybinds]` (eşitlenmiyorsa `None`).
     pub keybinds: Option<BTreeMap<String, String>>,
+    /// Doğrulanmış `[keybind_owner]`: çakışan tuşta kimin bind'i çalışsın.
+    pub key_owner: KeybindOwnerConfig,
     /// Shell masaüstü zeminini (duvar kağıdı) çiziyor: Hyprland varsayılan duvar kağıdı ve logosu
     /// kapatılır (bkz. [`GenerateInput::hide_defaults`]).
     pub hide_defaults: bool,
@@ -351,6 +353,12 @@ pub struct ConflictReport {
     pub file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
+    /// `conflicts`: `user_wins` (temel katman, kullanıcınınki bilerek kazanır), `user_choice`
+    /// (kullanıcı kendininkini seçti), `read_after|not_loaded|special_mods|unlocated` (Nuxut'unki
+    /// isteniyor ama devralınamıyor). `taken_over`: `default` ya da `chosen`.
+    pub reason: &'static str,
+    /// `conflicts`: "Nuxut'unkini kullan" seçilirse devralınabilir mi. `taken_over`'da her zaman `true`.
+    pub can_take: bool,
 }
 
 /// `msg hypr status` yanıtı (tasarım notu §6.3). Kullanıcı dosyasının satır metni girmez.
@@ -691,13 +699,22 @@ impl Syncer {
                         SourcePlan::Add => r.binds.len(),
                         _ => 0,
                     };
+                    let loaded = matches!(plan, SourcePlan::Present | SourcePlan::Add);
                     r.binds
                         .iter()
                         .enumerate()
                         .map(|(i, b)| UserKey {
                             combo: b.combo.clone(),
                             at: Some(b.at),
-                            takeable: req.compositor.take_over_keys && i < order && b.combo.mods & MOD_OTHER == 0,
+                            blocker: if !loaded {
+                                Some(Blocker::NotLoaded)
+                            } else if i >= order {
+                                Some(Blocker::ReadAfter)
+                            } else if b.combo.mods & MOD_OTHER != 0 {
+                                Some(Blocker::SpecialMods)
+                            } else {
+                                None
+                            },
                         })
                         .collect()
                 }
@@ -705,22 +722,30 @@ impl Syncer {
                     .map(live_user_binds)
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|combo| UserKey { combo, at: None, takeable: false })
+                    .map(|combo| UserKey { combo, at: None, blocker: Some(Blocker::Unlocated) })
                     .collect(),
             };
             // Temel katman kapalıysa yalnızca kabuk eylemleri (ses, panel, büyüteç…).
             let resolved = resolved.into_iter().filter(|b| req.compositor.base_layer || !b.action.is_base()).collect();
-            let split = split_bindings(resolved, &user);
+            let split = split_bindings(resolved, &user, |a| KeyPref::resolve(a, req.key_owner.get(a), req.compositor.take_over_keys));
             binds = split.keep;
             for c in split.conflicts {
                 let (file, line) = c.at.map_or((None, None), |at| self.loc(&files, at));
-                status.conflicts.push(ConflictReport { action: c.action.name(), combo: c.combo.to_string(), file, line });
+                status.conflicts.push(ConflictReport {
+                    action: c.action.name(),
+                    combo: c.combo.to_string(),
+                    file,
+                    line,
+                    reason: c.reason.name(),
+                    can_take: c.can_take,
+                });
             }
             for t in split.taken {
                 // Rapor: kullanıcının (değişmeyen) bind'inin ilk yeri; geri alma anahtarı belgede.
                 let (file, line) = t.at.first().copied().flatten().map_or((None, None), |at| self.loc(&files, at));
                 let combo = t.unbind.first().map(ToString::to_string).unwrap_or_default();
-                status.taken_over.push(ConflictReport { action: t.binding.action.name(), combo, file, line });
+                let reason = if t.chosen { "chosen" } else { "default" };
+                status.taken_over.push(ConflictReport { action: t.binding.action.name(), combo, file, line, reason, can_take: true });
                 taken.push((t.binding, t.unbind));
             }
         }
@@ -741,6 +766,8 @@ impl Syncer {
                 .map(|p| self.show(&p)),
             input: req.input.clone(),
             env: req.session_env.iter().chain(&req.cursor_env).cloned().collect(),
+            // Güvenilir kurulum dizini (`<ev>/.local/bin`, sahiplik/izin denetimli); yoksa satır yok.
+            session_path: crate::services::session_path::trusted_bin_dir(),
         };
         let mut generated = match kind {
             ConfigKind::Hyprlang => generate_conf(&input),
@@ -1151,6 +1178,7 @@ mod tests {
             motion: Some(MotionGroup::from_theme(&theme)),
             windows: Some(WindowsGroup::from_theme(&theme, 4, 8, 2)),
             keybinds: Some(KeybindsConfig::default().map),
+            key_owner: Default::default(),
             hide_defaults: true,
             shell_exe: "/usr/bin/nuxut-shell".into(),
             session_env: Vec::new(),
@@ -1680,6 +1708,69 @@ mod tests {
         assert!(base.contains("nuxut:volume_mute"), "CAPS'lı bind farklı tuş: Nuxut'unki temel katmanda");
         let json = st.to_json();
         assert!(json.contains("\"taken_over\":[{"), "{json}");
+    }
+
+    /// end4 benzeri zinciri (`tests/fixtures/hyprland/end4-like`) test dizinine kopyalar.
+    fn end4_like(s: &Setup) {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hyprland/end4-like");
+        for rel in ["hyprland.conf", "hyprland/env.conf", "hyprland/keybinds.conf", "custom/keybinds.conf"] {
+            let to = s.hypr.join(rel);
+            fs::create_dir_all(to.parent().unwrap()).unwrap();
+            fs::copy(src.join(rel), &to).unwrap();
+        }
+    }
+
+    /// Gerçek makinedeki "37 kısayol çakışması" (2026-10-17): end4 düzeninde kabuk eylemlerinin
+    /// hepsi devralınır; kalan 37'si temel katman eylemi, kullanıcınınki bilerek kazanır
+    /// (`user_wins`, uyarı değil) ve her biri tek tıkla Nuxut'a geçirilebilir.
+    #[test]
+    fn end4_like_chain_conflicts_are_intended() {
+        let s = setup(None);
+        end4_like(&s);
+        let syncer = Syncer::new(s.env.clone());
+        let st = syncer.run(&request(), Some(&Fake::default()));
+        assert_eq!(st.source, "present", "{st:?}");
+        let mut taken: Vec<_> = st.taken_over.iter().map(|t| t.action).collect();
+        taken.sort_unstable();
+        assert_eq!(
+            taken,
+            [
+                "brightness_down", "brightness_up", "emoji", "media_next", "media_pause", "media_play", "media_prev", "mic_mute",
+                "shot_region", "volume_down", "volume_mute", "volume_up"
+            ]
+        );
+        assert!(st.taken_over.iter().all(|t| t.reason == "default"));
+        assert_eq!(st.conflicts.len(), 37, "{:?}", st.conflicts.iter().map(|c| c.action).collect::<Vec<_>>());
+        assert!(st.conflicts.iter().all(|c| c.reason == "user_wins" && c.can_take), "{:?}", st.conflicts);
+        let q = st.conflicts.iter().find(|c| c.action == "close_window").unwrap();
+        assert_eq!((q.combo.as_str(), q.file.as_deref()), ("SUPER+q", Some("~/xdg-config/hypr/hyprland/keybinds.conf")));
+        assert!(st.to_json().contains("\"reason\":\"user_wins\",\"can_take\":true"), "{}", st.to_json());
+
+        // "Nuxut'unkini kullan" (pencere kapatma) ve "Benimkini koru" (ses kapat): biri devralınır,
+        // öteki kullanıcının seçimi olarak raporlanır. Kullanıcının dosyası değişmez.
+        let before = fs::read_to_string(s.hypr.join("hyprland/keybinds.conf")).unwrap();
+        let mut req = request();
+        req.key_owner.map.insert("close_window".into(), "nuxut".into());
+        req.key_owner.map.insert("volume_mute".into(), "user".into());
+        let st = syncer.run(&req, Some(&Fake::default()));
+        let q = st.taken_over.iter().find(|t| t.action == "close_window").unwrap();
+        assert_eq!(q.reason, "chosen");
+        let m = st.conflicts.iter().find(|c| c.action == "volume_mute").unwrap();
+        assert_eq!((m.reason, m.can_take), ("user_choice", true));
+        assert_eq!(st.conflicts.len(), 37);
+        let tail = fs::read_to_string(s.hypr.join("nuxut.conf")).unwrap();
+        assert!(tail.contains("unbind = SUPER, q\nbindd = SUPER, q, nuxut:close_window, killactive"), "{tail}");
+        assert!(!tail.contains("nuxut:volume_mute"), "{tail}");
+        assert_eq!(fs::read_to_string(s.hypr.join("hyprland/keybinds.conf")).unwrap(), before);
+
+        // Nuxut satırından SONRA okunan bind: Nuxut'unki istense de devralınamaz → uyarı (neden + yer).
+        let main = s.hypr.join("hyprland.conf");
+        let text = fs::read_to_string(&main).unwrap() + "source = custom/late.conf\n";
+        fs::write(&main, text).unwrap();
+        fs::write(s.hypr.join("custom/late.conf"), "bind = Super+Shift, V, exec, cliphist\n").unwrap();
+        let st = syncer.run(&req, Some(&Fake::default()));
+        let v = st.conflicts.iter().find(|c| c.action == "clipboard").unwrap();
+        assert_eq!((v.reason, v.can_take, v.file.as_deref(), v.line), ("read_after", false, Some("~/xdg-config/hypr/custom/late.conf"), Some(1)));
     }
 
     /// Eski kurulum (sondaki satır var, temel katman yok): katman tek başına, snapshot'lı eklenir.

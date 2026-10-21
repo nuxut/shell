@@ -233,6 +233,10 @@ fn run(argv: &[String], cwd: Option<&Path>, token: Option<&str>, long_lived: boo
     for (key, _) in std::env::vars_os().filter(|(k, _)| is_scrubbed_env(k)) {
         cmd.env_remove(key);
     }
+    // Kurulum dizini oturuma sonradan eklendiyse yeni terminal de görsün (services::session_path).
+    if let Some(path) = crate::services::session_path::child_path() {
+        cmd.env("PATH", path);
+    }
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }

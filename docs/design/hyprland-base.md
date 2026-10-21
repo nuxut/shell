@@ -172,11 +172,43 @@ Print ve SUPER+. tuşlarını bağladığı için 11 Nuxut kısayolu çakışma 
 - **Yazım:** `nuxut.conf`'un sonunda `unbind = <kullanıcının tuşu>` + Nuxut'un bind'i. Temel
   katmana konmaz: oradaki bind kullanıcınınkinden önce okunduğu için `unbind` onu da silerdi.
   Kullanıcının dosyasına hiçbir koşulda yazılmaz (yedek gerekmez: dosyası değişmeden durur).
-- **Geri alma:** `[compositor] take_over_keys = false` (şemada; Ayarlar satırı ayrı iş) → sonraki turda
+- **Geri alma:** kısayol başına `[keybind_owner] <eylem> = "user"` (Ayarlar › Kısayollar "Benimkini koru", §3.5) ya da hepsi için `[compositor] take_over_keys = false` → sonraki turda
   `unbind` satırları kalkar, kullanıcınınki yeniden çalışır; `msg hypr undo` her şeyi kaldırır.
-- **Rapor:** `msg hypr status` `taken_over: [{action, combo, file, line}]` (kullanıcının değişmeyen
+- **Rapor:** `msg hypr status` `taken_over: [{action, combo, file, line, reason, can_take}]` (kullanıcının değişmeyen
   bind'inin yeri), devralınamayanlar `conflicts`.
 - **Lua:** kullanıcı bind'lerinin yeri bilinmiyor (`hyprctl binds`): devralma yok, eski kural.
+
+### 3.5 Kısayol başına seçim ve çakışma raporu (2026-10-17)
+
+Gerçek makinede (end4 düzeni: `hyprland.conf` → `hyprland/…keybinds.conf` + `custom/` + en sonda
+`nuxut.conf`) `nuxut-shell doctor` "37 Hyprland kısayol çakışması ⚠" gösterdi (önceden 11). Tanı
+(`sync.rs` `end4_like_chain_conflicts_are_intended`, `tests/fixtures/hyprland/end4-like`): yeni
+kısayol eklenmedi, devralma çalışıyor — 12 kabuk eylemi (ses ±/sessiz, mikrofon, parlaklık ±,
+oynat/duraklat/sonraki/önceki, Print, SUPER+.) devralınıyor; kalan 37'nin hepsi temel katman
+eylemi (başlatıcı, pencere kapat/odak/taşı/boyutlandır, çalışma alanları, karalama alanı, uygulama
+açma…), ADR-0006 gereği kullanıcınınki bilerek kazanıyor. Önceki 11'i (§3.4, kabuk eylemleri)
+devralma çözdü; doctor ise temel katmanın bilinçli çakışmalarını da uyarı sayıyordu.
+
+- **Seçim:** `shell.toml` `[keybind_owner] <eylem> = "nuxut" | "user"`. Öncelik: açık seçim >
+  `take_over_keys` (yalnızca kabuk eylemleri) > varsayılan (kabuk → Nuxut, temel katman →
+  kullanıcı). "nuxut" temel katman eylemini de devralır (`unbind` + Nuxut'unki, ayar katmanında;
+  §3.4'teki koşullar aynen). Ayarlar › Kısayollar her çakışan satırda tek düğme gösterir:
+  kullanıcınınki çalışıyorsa "Nuxut'unkini kullan", Nuxut'unki çalışıyorsa ya da devralınamıyorsa
+  "Benimkini koru". Komut yazdırılmaz.
+- **Rapor:** `msg hypr status` `conflicts[]` ve `taken_over[]` öğelerine `reason` ve `can_take`
+  eklendi. `conflicts.reason`: `user_wins` (temel katman varsayılanı), `user_choice` (açık seçim ya
+  da `take_over_keys = false`) → bilinçli; `read_after` (kullanıcının bind'i `nuxut.conf`'tan
+  sonra okunuyor), `not_loaded` (`nuxut.conf` yüklenmiyor), `special_mods` (CAPS/MOD2…),
+  `unlocated` (Lua: yer bilinmiyor) → Nuxut'unki isteniyor ama devralınamıyor. `can_take`:
+  "Nuxut'unkini kullan" işe yarar mı (çakışan her bind'in engeli yok). `taken_over.reason`:
+  `default` | `chosen`. Engellenmiş eylemde raporlanan yer engelli bind'inkidir.
+- **doctor:** bilinçli çakışmalar ⚠ değil ℹ (`keys_user`: "N kısayolda Hyprland ayarınızdaki tuş
+  geçerli (bilerek)"); devralınanlar ℹ (`keys_taken`); yalnız devralınamayanlar ⚠ (`conflicts`),
+  her öğede dosya:satır ve neden; öneri Ayarlar'daki düğmeler. Nedeni olmayan (eski kabuk) öğe ⚠.
+- **`read_after` için "Nuxut'unkini kullan" yok:** Hyprland'de sonra okunan bind önce yazılan
+  `unbind`'ı boşa çıkarır; tek çözüm kullanıcının dosyasında satır taşımak olurdu (Nuxut'un ayar
+  katmanının yerini değiştirmek kullanıcının sonraki ayarlarını da ezerdi). Satır "Benimkini koru"
+  (bilgiye döner) ya da Nuxut'a başka tuş atanmasını önerir.
 
 ## 4. Hareket
 

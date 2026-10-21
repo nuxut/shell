@@ -594,6 +594,9 @@ launcher = "SUPER"      # tek değiştiriciye dokun (Super_L/Super_R bırakınca
 workspace = "SUPER"     # rakam ailesi: değiştirici + 1…0 (tuş kodu code:10…19, düzenden bağımsız); move_to_workspace = "SUPER+SHIFT"
 close_window = "SUPER+Q"  # pencere: close_window_alt = "ALT+F4", fullscreen = "SUPER+F", focus_left = "SUPER+Left", …
 
+[keybind_owner]         # Hyprland ayarında aynı tuş bağlıysa kimin bind'i çalışsın: eylem = "nuxut" | "user"
+close_window = "nuxut"  # verilmeyen: kabuk eylemi → Nuxut (take_over_keys), temel katman → kullanıcı; Ayarlar › Kısayollar yazar (docs/design/hyprland-base.md §3.5)
+
 [setup]
 welcome = true          # setup.toml yoksa ilk açılışta nuxut-settings --welcome
 
@@ -1997,7 +2000,7 @@ README). Kaldırma (`--uninstall`) ayarlara ve yedeklere dokunmaz.
 **Kurulum dizini PATH'te** (kullanıcı kararı 2026-10-16: kabuk başlangıç dosyalarına
 (.bash_profile/.profile/fish) yazılmaz, elle adım gerektiren çözüm yok). tty → bash → start-hyprland
 yolunda `environment.d` okunmaz. Bu yüzden dizini Nuxut'un Hyprland katmanı koyar: `nuxut.conf`
-oturumda bir kez `envd = PATH,<dizin>:$PATH` (hyprlang `$PATH`'i o anki ortamdan açar; Hyprland
+oturumda bir kez `envd = PATH,$PATH:<dizin>` (hyprlang `$PATH`'i o anki ortamdan açar; Hyprland
 `env`'i her yeniden okumada yeniden kurduğu için blok `# hyprlang if !NUXUT_PATH_ADDED` korumalı,
 işaret sonda — yoksa PATH her yeniden yüklemede büyürdü; `envd` systemd/D-Bus'a da aktarır),
 `nuxut.lua` `os.getenv` ile yalnızca yoksa ekler; oturum kancası `import-environment PATH …`.
@@ -2013,11 +2016,39 @@ yeniden yüklemede ve çalışırken `keyword`/`eval` ile de uygular (0.56.2 kay
 install.sh sonunda dizin oturumda (bu terminal + systemd ortamı) yoksa çalışan Hyprland'e yalnız
 IPC ile eklenir: Lua ayarında `hyprctl eval` (Hyprland'in kendi PATH'i okunur, dizin varsa
 eklenmez; üçüncü argüman systemd/D-Bus'a da aktarır), hyprlang'da `hyprctl keyword envd
-PATH,<dizin>:$PATH`. Dosya yazılmaz. Hyprland'in başlattığı yeni terminaller hemen alır; açık
+PATH,$PATH:<dizin>`. Dosya yazılmaz. Hyprland'in başlattığı yeni terminaller hemen alır; açık
 terminaller eski PATH'i taşır ve çıktı bunu söyler. Hyprland dışında ya da IPC başarısızsa
 "oturumu yeniden açın" iletisi. Oturumda var ama bu terminalde yoksa yalnız "yeni terminallerde
 çalışır" denir. Test: `install_path.sh` (sahte hyprctl, gerçek `lua` ile parça denemesi;
 `XDG_RUNTIME_DIR` geçici olduğundan gerçek oturuma ulaşılamaz).
+
+**Kabuk PATH'i kendisi onarır** (kullanıcı isteği 2026-10-17): asıl örnek açılışta (ayrı thread,
+`services::session_path`) dizin Hyprland'in başlangıç ortamında yoksa aynı yöntemi kendi
+Hyprland soketiyle uygular (Lua: `eval`, kendi denetimiyle; hyprlang: `keyword envd` + katmanın
+`NUXUT_PATH_ADDED` işareti, ayar yeniden okununca ikinci kez eklenmesin). `/proc/<pid>/environ`
+başlangıç ortamıdır, sonradan eklenen PATH'i göstermez: başarıda
+`$XDG_RUNTIME_DIR/nuxut/session-path-<imza>` işareti yazılır; kabuk yeniden başlarsa tekrar
+göndermez, doctor işareti görünce "Kabuk … dizinini bu oturumun PATH'ine ekledi" (bilgi) ve
+"Yeni açılan terminallerde etkin; açık terminalleri yeniden açın" der. Kabuğun başlatıcısından
+açılan uygulamalar da (kabuğun kendi ortamı eski) güncel PATH'i alır. Test örneği hiçbir şey
+göndermez. doctor PATH önerilerinde komut yazdırmaz (`install.sh --fix-path`, `fish_add_path`
+önerileri kalktı): oturumda yoksa "kabuk açılışta kendisi ekler; kabuğu yeniden başlatın".
+
+**PATH güvenliği** (güvenlik incelemesi 2026-10-17, güvenilmeyen arama yolu): kurulum dizini
+oturum PATH'inin her yerde SONUNA eklenir (install.sh IPC ve environment.d satırı, nuxut.conf
+`envd = PATH,$PATH:<dizin>`, nuxut.lua `path .. ":" .. dizin`, kabuğun IPC'si, başlatıcının alt
+süreç PATH'i): `nuxut-*` adları benzersiz; başa eklenseydi kullanıcının yazabildiği bir dosya
+`ls`, `sudo` gibi komutların önüne geçerdi. Dizin yalnız güvenilir kaynaktan: kabuk ve katman
+için parola veritabanındaki ev dizininin `.local/bin`'i (`$HOME` değil; kabuk oradan çalışıyorsa,
+`current_exe` yalnız karşılaştırılır), install.sh için kurulumun kendi önekinin `bin`'i. Dizin
+sembolik bağ olmamalı, sahibi kullanıcı, grup/başkaları yazamaz; üst dizinler kullanıcıya ya da
+root'a ait ve grup/başkaları yazamaz. Hyprland'e (`keyword`, `eval`) ve dosyalara giden değer
+yalnız `[A-Za-z0-9/._+-]` (virgül, `$`, `:`, boşluk, tırnak, satır sonu, `.`/`..` bileşeni yok);
+sistem dizinleri hiç eklenmez. Denetim geçmezse hiçbir şey eklenmez (install.sh uyarır, kabuk
+log'a yazar). Özel `--prefix` kurulumunda katman ve kabuk PATH eklemez (yalnız install.sh'nin o
+anki IPC'si). Testler: `session_path::tests::{trust_rules, commands_reject_unsafe_dirs,
+passwd_home_by_uid}`, `generate::tests::session_path_block_once_per_session`,
+`tests/fixtures/install_path.sh` (sahte hyprctl; güvensiz dizinlerde hyprctl hiç çağrılmaz).
 
 **Kendini güncelleme** (2026-10-16): betik `$SRC/shell`'i git ile günceller
 ama çalışan kopya eskisidir; bu yüzden betikteki bir değişiklik eskiden ancak ikinci

@@ -77,6 +77,8 @@ input.mouse map
 input.mouse.* any
 input.touchpad map
 input.touchpad.* any
+keybind_owner map
+keybind_owner.* str
 keybinds map
 keybinds.* str
 launcher table

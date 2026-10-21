@@ -197,6 +197,9 @@ pub struct SessionPath {
     pub shell: Option<bool>,
     /// `~/.config/environment.d/50-nuxut-path.conf` var.
     pub envd_file: bool,
+    /// Kabuk dizini bu Hyprland oturumuna IPC ile ekledi ([`crate::services::session_path`]
+    /// işareti). Hyprland'in ve kabuğun `/proc` ortamı başlangıç anınındır, eklemeyi göstermez.
+    pub applied: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -391,6 +394,17 @@ fn join_limited(items: &[String]) -> String {
     out
 }
 
+/// Devralınamayan kısayolun nedeni (`msg hypr status` `conflicts[].reason`); eski kabukta alan yok.
+fn conflict_reason(reason: Option<&str>) -> Option<String> {
+    Some(match reason? {
+        "read_after" => t!("shell-doctor-conflict-read-after"),
+        "not_loaded" => t!("shell-doctor-conflict-not-loaded"),
+        "special_mods" => t!("shell-doctor-conflict-special-mods"),
+        "unlocated" => t!("shell-doctor-conflict-unlocated"),
+        _ => return None,
+    })
+}
+
 /// JSON'dan kısa, kontrol karaktersiz dize (kabuk yanıtı dış girdi sayılır).
 fn s(v: &Value, key: &str) -> Option<String> {
     v.get(key)?.as_str().map(|s| s.chars().filter(|c| !c.is_control()).take(200).collect())
@@ -406,7 +420,7 @@ pub fn evaluate(f: &Facts) -> Report {
         v: REPORT_VERSION,
         version: f.install.version.clone(),
         sections: vec![
-            install(&cx, &f.install),
+            install(&cx, &f.install, running.is_some()),
             shell(&f.live, &f.competitors),
             hyprland(&cx, running, &f.packs, f.hypr_config.as_deref()),
             look(&cx, running, &f.gtk_links),
@@ -425,13 +439,19 @@ fn section(id: &'static str, title: String, checks: Vec<Check>) -> Section {
 
 /// Etkili PATH: terminal dışındaki ortamlar (systemd kullanıcı yöneticisi, Hyprland, çalışan
 /// kabuk). Kabuğun başlattığı komutlar bu ortamlardan gelir; environment.d dosyasının varlığı
-/// yetmez.
-fn session_path_check(cx: &Ctx, i: &Install, dir: &str) -> Check {
+/// yetmez. Eksikse kabuk açılışta kendisi ekler ([`crate::services::session_path`]); öneri komut
+/// değil, ne olacağıdır (kullanıcı isteği 2026-10-17: doctor komut yazdırmaz).
+fn session_path_check(i: &Install, dir: &str, shell_running: bool) -> Check {
     let sp = i.session_path;
     let envs = [("systemd", sp.systemd), ("Hyprland", sp.hyprland), ("nuxut-shell", sp.shell)];
     let names = |want: bool| envs.iter().filter(|(_, v)| *v == Some(want)).map(|(n, _)| *n).collect::<Vec<_>>();
     let (with, without) = (names(true), names(false));
-    let data = json!({"systemd": sp.systemd, "hyprland": sp.hyprland, "shell": sp.shell, "envd_file": sp.envd_file});
+    let data = json!({"systemd": sp.systemd, "hyprland": sp.hyprland, "shell": sp.shell, "envd_file": sp.envd_file, "applied": sp.applied});
+    if sp.applied {
+        return check("session_path", Level::Info, t!("shell-doctor-session-path-applied", dir = dir.to_owned()))
+            .hint(t!("shell-doctor-hint-path-reopen-terminals"))
+            .data(data);
+    }
     if without.is_empty() {
         let c = if with.is_empty() {
             check("session_path", Level::Info, t!("shell-doctor-session-path-unknown"))
@@ -440,39 +460,32 @@ fn session_path_check(cx: &Ctx, i: &Install, dir: &str) -> Check {
         };
         return c.data(data);
     }
-    let hint = if sp.systemd == Some(false) && !sp.envd_file {
-        t!("shell-doctor-hint-fix-path", cmd = format!("sh {} --fix-path", cx.path(&i.install_sh)))
-    } else if sp.systemd == Some(false) {
-        // Dosya var ama yönetici onu okumadan başlamış.
-        t!("shell-doctor-hint-session-path-relogin")
-    } else {
-        // systemd tamam; Hyprland ya da kabuk başka bir ortamdan başlamış.
-        t!("shell-doctor-hint-session-path-hyprland")
-    };
     check("session_path", Level::Warn, t!("shell-doctor-session-path-missing", dir = dir.to_owned(), list = without.join(", ")))
-        .hint(hint)
+        .hint(session_path_hint(shell_running))
         .data(data)
 }
 
-fn install(cx: &Ctx, i: &Install) -> Section {
+/// Oturum PATH'i eksikken öneri: kabuk açılışta kendisi ekler.
+fn session_path_hint(shell_running: bool) -> String {
+    if shell_running { t!("shell-doctor-hint-session-path-restart") } else { t!("shell-doctor-hint-session-path-start") }
+}
+
+fn install(cx: &Ctx, i: &Install, shell_running: bool) -> Section {
     let dir = i.bin_dir.as_deref().map(|d| cx.path(d)).unwrap_or_else(|| "?".into());
     let mut checks = Vec::new();
     // PATH ilk satır: kullanıcı en çok bunu yaşıyor ("nuxut-shell: komut bulunamadı").
     checks.push(if i.in_path {
         check("path", Level::Ok, t!("shell-doctor-path-ok", dir = dir.clone()))
     } else {
-        let hint = match i.login_shell {
-            // fish_add_path evrensel değişken yazar: yeni terminallerde hemen geçerli, oturum kapatmaya gerek yok.
-            LoginShell::Fish => t!("shell-doctor-hint-fix-path-fish", cmd = format!("fish_add_path {dir}")),
-            LoginShell::Bash | LoginShell::Zsh | LoginShell::Other => {
-                t!("shell-doctor-hint-fix-path", cmd = format!("sh {} --fix-path", cx.path(&i.install_sh)))
-            }
-        };
+        // Oturumda varsa bu terminal eklemeden önce açılmıştır; yoksa kabuk ekler.
+        let sp = i.session_path;
+        let in_session = sp.applied || ([sp.systemd, sp.hyprland, sp.shell].contains(&Some(true)) && ![sp.systemd, sp.hyprland, sp.shell].contains(&Some(false)));
+        let hint = if in_session { t!("shell-doctor-hint-path-reopen-terminals") } else { session_path_hint(shell_running) };
         check("path", Level::Warn, t!("shell-doctor-path-missing", dir = dir.clone())).hint(hint)
     }
     .data(json!({"dir": dir, "shell": i.login_shell.id()})));
     if i.bin_dir.is_some() {
-        checks.push(session_path_check(cx, i, &dir));
+        checks.push(session_path_check(i, &dir, shell_running));
     }
     let found = i.total_bins - i.missing_bins.len();
     checks.push(if i.missing_bins.is_empty() {
@@ -576,29 +589,46 @@ fn hyprland(cx: &Ctx, r: Option<&Running>, packs: &[PackHit], config: Option<&Pa
                 c = c.hint(t!("shell-doctor-hint-hypr-source"));
             }
             checks.push(c);
-            let conflicts: Vec<String> = h
-                .get("conflicts")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .map(|c| {
-                            let at = match (s(c, "file"), c.get("line").and_then(Value::as_u64)) {
-                                (Some(f), Some(l)) => format!(" ({}:{l})", cx.path_str(&f)),
-                                (Some(f), None) => format!(" ({})", cx.path_str(&f)),
-                                _ => String::new(),
-                            };
-                            format!("{} {}{at}", s(c, "combo").unwrap_or_default(), s(c, "action").unwrap_or_default())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            checks.push(if conflicts.is_empty() {
+            let list = |v: &Value| -> Vec<Value> { v.as_array().cloned().unwrap_or_default() };
+            let item = |c: &Value, why: Option<String>| {
+                let at = match (s(c, "file"), c.get("line").and_then(Value::as_u64)) {
+                    (Some(f), Some(l)) => format!("{}:{l}", cx.path_str(&f)),
+                    (Some(f), None) => cx.path_str(&f),
+                    _ => String::new(),
+                };
+                let note: Vec<String> = [Some(at).filter(|a| !a.is_empty()), why].into_iter().flatten().collect();
+                let note = if note.is_empty() { String::new() } else { format!(" ({})", note.join(": ")) };
+                format!("{} {}{note}", s(c, "combo").unwrap_or_default(), s(c, "action").unwrap_or_default())
+            };
+            // Kullanıcınınki bilerek kazanan (temel katman, ADR-0006) ya da kullanıcının seçtiği
+            // çakışmalar uyarı değil bilgi (2026-10-17: end4 düzeninde 37 pencere kısayolu ⚠ sayılıyordu).
+            let all = h.get("conflicts").map(list).unwrap_or_default();
+            let (intended, blocked): (Vec<&Value>, Vec<&Value>) =
+                all.iter().partition(|c| matches!(s(c, "reason").as_deref(), Some("user_wins" | "user_choice")));
+            let blocked: Vec<String> = blocked.iter().map(|c| item(c, conflict_reason(s(c, "reason").as_deref()))).collect();
+            checks.push(if blocked.is_empty() {
                 check("conflicts", Level::Ok, t!("shell-doctor-hypr-conflicts-none"))
             } else {
-                check("conflicts", Level::Warn, t!("shell-doctor-hypr-conflicts", count = conflicts.len(), list = join_limited(&conflicts)))
+                check("conflicts", Level::Warn, t!("shell-doctor-hypr-conflicts", count = blocked.len(), list = join_limited(&blocked)))
                     .hint(t!("shell-doctor-hint-conflicts"))
             }
-            .data(json!({"count": conflicts.len()})));
+            .data(json!({"count": blocked.len()})));
+            if !intended.is_empty() {
+                let names: Vec<String> = intended.iter().map(|c| item(c, None)).collect();
+                checks.push(
+                    check("keys_user", Level::Info, t!("shell-doctor-hypr-keys-user", count = names.len(), list = join_limited(&names)))
+                        .hint(t!("shell-doctor-hint-keys-user"))
+                        .data(json!({"count": names.len()})),
+                );
+            }
+            let taken = h.get("taken_over").map(list).unwrap_or_default();
+            if !taken.is_empty() {
+                let names: Vec<String> = taken.iter().map(|c| item(c, None)).collect();
+                checks.push(
+                    check("keys_taken", Level::Info, t!("shell-doctor-hypr-keys-taken", count = names.len(), list = join_limited(&names)))
+                        .data(json!({"count": names.len()})),
+                );
+            }
         }
     }
     if packs.is_empty() {
